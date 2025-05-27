@@ -48,7 +48,12 @@ namespace VacantRoomWeb
         {
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "未知IP";
 
-            Console.WriteLine($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} 获取数据");
+            Console.Write($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} ");
+
+            Console.ForegroundColor = ConsoleColor.Yellow;//使用黄色字体
+            Console.WriteLine("获取数据");
+            Console.ResetColor(); // 恢复默认颜色
+            Console.WriteLine($"查询条件：{campus.Substring(0,2)} {weekday} {period} {building}教学楼 {week}");
 
 
             var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
