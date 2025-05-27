@@ -1,5 +1,6 @@
-﻿using System.Collections.Generic;
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
+using Microsoft.AspNetCore.Components.Server.Circuits;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -7,6 +8,21 @@ namespace VacantRoomWeb
 {
     public class VacantRoomService
     {
+        private readonly ConnectionCounterService _counter;
+        private readonly ClientConnectionTracker _ipTracker;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public VacantRoomService(
+            ConnectionCounterService counter,
+            ClientConnectionTracker ipTracker,
+            IHttpContextAccessor httpContextAccessor)
+        {
+            _counter = counter;
+            _ipTracker = ipTracker;
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+
         List<string> list = new List<string> { "A101", "A102", "A103", "A104", "A105", "A106",
                                                "A201", "A202", "A203", "A204", "A205", "A206",
                                                "A301", "A302", "A303", "A304", "A305",
@@ -30,7 +46,10 @@ namespace VacantRoomWeb
 
         public List<string> GetVacantRooms(string campus, string weekday, string period, string building, string week)
         {
-            Console.WriteLine(DateTime.Now + " 读取文件…");
+            var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "未知IP";
+
+            Console.WriteLine($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} 获取数据");
+
 
             var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
             if (!File.Exists(filePath))

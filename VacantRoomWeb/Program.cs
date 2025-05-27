@@ -9,8 +9,12 @@ builder.Services.AddSingleton<VacantRoomService>();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+
+
 //用于处理连接数统计的服务
-builder.Services.AddSingleton<ConnectionCounterService>();
+builder.Services.AddSingleton<ConnectionCounterService>(); 
+builder.Services.AddSingleton<ClientConnectionTracker>();
+builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
 
 builder.WebHost.ConfigureKestrel(options =>
