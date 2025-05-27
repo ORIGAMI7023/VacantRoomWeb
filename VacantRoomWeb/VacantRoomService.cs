@@ -30,9 +30,9 @@ namespace VacantRoomWeb
 
         public List<string> GetVacantRooms(string campus, string weekday, string period, string building, string week)
         {
-            Console.WriteLine("读取文件…");
+            Console.WriteLine(DateTime.Now + " 读取文件…");
 
-            var filePath = Path.Combine("wwwroot", "schedule.xlsx");
+            var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
             if (!File.Exists(filePath))
             {
                 Console.WriteLine("文件未找到：" + filePath);
@@ -56,7 +56,7 @@ namespace VacantRoomWeb
                 // 校区匹配
                 if (rowCampus != campus) continue;
 
-                if (room == "A206" && rowTime == "周二 01-02节"&&period=="1-2节")
+                if (room == "A206" && rowTime == "周二 01-02节" && period == "1-2节")
                     ;
 
                 // 时间段匹配（更强判断：节次区间是否覆盖）

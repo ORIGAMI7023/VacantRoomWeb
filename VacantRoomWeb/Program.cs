@@ -12,6 +12,10 @@ builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(5046); // 明确监听所有网卡 IP 的 HTTP 5046 端口
     options.ListenAnyIP(7152, listen => listen.UseHttps()); // HTTPS
+
+    //  限制最大连接数，避免资源占满导致崩溃
+    options.Limits.MaxConcurrentConnections = 20;
+    options.Limits.MaxConcurrentUpgradedConnections = 20;
 });
 
 var app = builder.Build();

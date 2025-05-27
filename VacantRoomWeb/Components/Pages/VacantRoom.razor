@@ -3,6 +3,7 @@
 @inject VacantRoomService VacantService
 
 <h3 style="margin-bottom: 1rem;">空教室查询</h3>
+<p style="font-size: 1.1rem; color: gray;">@TodayText</p>
 
 <div style="max-width: 400px;">
     <div style="margin-bottom: 1rem;">
@@ -85,11 +86,13 @@
 
 @code {
     string Campus = "奉贤校区";
-    string Weekday = "周一";
+    string Weekday = "";
     string Period = "1-2节";
     string Building = "所有";
     string Week = "第1周";
+
     List<string> Result;
+    string TodayText;
 
     record SelectItem(string Label, Func<string> Get, Action<string> Set, List<(string Value, string Text)> Options);
     List<SelectItem> selectors => new()
@@ -106,4 +109,34 @@
     {
         Result = VacantService.GetVacantRooms(Campus, Weekday, Period, Building, Week);
     }
+
+    protected override void OnInitialized()
+    {
+        // 默认星期几设置
+        var today = DateTime.Today.DayOfWeek;
+        TodayText = DateTime.Today.ToString("D");
+
+        Weekday = today switch
+        {
+            DayOfWeek.Monday => "周一",
+            DayOfWeek.Tuesday => "周二",
+            DayOfWeek.Wednesday => "周三",
+            DayOfWeek.Thursday => "周四",
+            DayOfWeek.Friday => "周五",
+            _ => "周一"
+        };
+
+        // 设置：第14周开始于 2025年5月27日（周二）
+        DateTime week14Start = new DateTime(2025, 5, 27);
+        int passedDays = (DateTime.Today - week14Start).Days;
+        int weekOffset = passedDays / 7;
+        int currentWeekNumber = 14 + weekOffset;
+
+        // 限制范围 1~18
+        if (currentWeekNumber < 1) currentWeekNumber = 1;
+        if (currentWeekNumber > 18) currentWeekNumber = 18;
+
+        Week = $"第{currentWeekNumber}周";
+    }
+
 }
