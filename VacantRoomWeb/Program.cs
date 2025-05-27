@@ -1,0 +1,36 @@
+using VacantRoomWeb;
+using VacantRoomWeb.Components;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<VacantRoomService>();
+
+// Add services to the container.
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(5046); // 明确监听所有网卡 IP 的 HTTP 5046 端口
+    options.ListenAnyIP(7152, listen => listen.UseHttps()); // HTTPS
+});
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
+    app.UseHsts();
+}
+
+
+//app.UseHttpsRedirection();
+
+app.UseStaticFiles();
+app.UseAntiforgery();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.Run();

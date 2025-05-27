@@ -1,0 +1,109 @@
+﻿@page "/vacant"
+@rendermode InteractiveServer
+@inject VacantRoomService VacantService
+
+<h3 style="margin-bottom: 1rem;">空教室查询</h3>
+
+<div style="max-width: 400px;">
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">校区：</label>
+        <select @bind="Campus" style="width: 200px;">
+            <option value="奉贤校区">奉贤</option>
+            <option value="徐汇校区">徐汇</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">星期：</label>
+        <select @bind="Weekday" style="width: 200px;">
+            <option>周一</option>
+            <option>周二</option>
+            <option>周三</option>
+            <option>周四</option>
+            <option>周五</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">节次：</label>
+        <select @bind="Period" style="width: 200px;">
+            <option>1-2节</option>
+            <option>3-4节</option>
+            <option>5-6节</option>
+            <option>7-8节</option>
+            <option>9-10节</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">教学楼：</label>
+        <select @bind="Building" style="width: 200px;">
+            <option>所有</option>
+            <option>A</option>
+            <option>B</option>
+            <option>C</option>
+            <option>D</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">第几周：</label>
+        <select @bind="Week" style="width: 200px;">
+            @for (int i = 1; i <= 18; i++)
+            {
+                <option value="@($"第{i}周")">第 @i 周</option>
+            }
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <button @onclick="QueryVacantRooms" style="padding: 6px 12px; font-weight: bold;">
+            查询空教室
+        </button>
+    </div>
+
+    <hr />
+
+    <p style="color: red;">[Debug]当前选中： @Campus, @Weekday, @Period, @Building, @Week</p>
+
+    @if (Result != null)
+    {
+        <p style="color: orange;">[Debug]共查询到 @Result.Count 教室</p>
+        <ul>
+            @foreach (var room in Result)
+            {
+                <li>@room</li>
+            }
+        </ul>
+    }
+    else
+    {
+        <p style="color: gray;">请填写条件后点击查询</p>
+    }
+</div>
+
+
+@code {
+    string Campus = "奉贤校区";
+    string Weekday = "周一";
+    string Period = "1-2节";
+    string Building = "所有";
+    string Week = "第1周";
+    List<string> Result;
+
+    record SelectItem(string Label, Func<string> Get, Action<string> Set, List<(string Value, string Text)> Options);
+    List<SelectItem> selectors => new()
+    {
+        new("校区：",     () => Campus,   v => Campus = v, new() { ("奉贤校区", "奉贤"), ("徐汇校区", "徐汇") }),
+        new("星期：",     () => Weekday,  v => Weekday = v, new() { ("周一", "周一"), ("周二", "周二"), ("周三", "周三"), ("周四", "周四"), ("周五", "周五") }),
+        new("节次：",     () => Period,   v => Period = v, new() { ("1-2节", "1-2节"), ("3-4节", "3-4节"), ("5-6节", "5-6节"), ("7-8节", "7-8节"), ("9-10节", "9-10节") }),
+        new("教学楼：",   () => Building, v => Building = v, new() { ("所有", "所有"), ("A", "A"), ("B", "B"), ("C", "C"), ("D", "D") }),
+        new("第几周：",   () => Week,     v => Week = v, Enumerable.Range(1, 18).Select(i => ($"第{i}周", $"第 {i} 周")).ToList())
+    };
+
+
+    void QueryVacantRooms()
+    {
+        Result = VacantService.GetVacantRooms(Campus, Weekday, Period, Building, Week);
+    }
+}
