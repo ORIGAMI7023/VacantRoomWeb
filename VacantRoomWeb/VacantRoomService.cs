@@ -80,18 +80,11 @@ namespace VacantRoomWeb
                 // 校区匹配
                 if (rowCampus != campus) continue;
 
-                if (room == "A206" && rowTime == "周二 01-02节" && period == "1-2节")
-                    ;
-
                 // 时间段匹配（更强判断：节次区间是否覆盖）
                 if (!IsPeriodMatch(rowTime, weekday, period)) continue;
 
                 // 周次匹配（如“第1周”是否在“1-16周全”中）
                 if (!IsWeekMatch(rowWeeks, week)) continue;
-
-
-                if (room.StartsWith("A"))
-                    ;
 
                 occupiedRooms.Add(room);
             }
