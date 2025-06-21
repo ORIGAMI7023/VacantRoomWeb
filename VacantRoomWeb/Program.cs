@@ -17,28 +17,32 @@ builder.Services.AddSingleton<ClientConnectionTracker>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
 
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenAnyIP(5046); // 明确监听所有网卡 IP 的 HTTP 5046 端口
-    options.ListenAnyIP(7152, listen => listen.UseHttps()); // HTTPS
+//builder.WebHost.ConfigureKestrel(options =>
+//{
+//    options.ListenAnyIP(80); 
+//    options.ListenAnyIP(443, listen =>
+//    {
+//        const string pfxPath = @"C:\Users\Administrator\Desktop\scs1750424505694_origami7023.cn_IIS\scs1750424505694_origami7023.cn_server.pfx";
+//        const string pfxPwd = "Kn9?cgGxZ9xxXBEf";      
 
-    //  限制最大连接数，避免资源占满导致崩溃
-    options.Limits.MaxConcurrentConnections = 20;
-    options.Limits.MaxConcurrentUpgradedConnections = 20;
-});
+//        listen.UseHttps(pfxPath, pfxPwd);
+//    });
+
+//    options.Limits.MaxConcurrentConnections = 20;
+//    options.Limits.MaxConcurrentUpgradedConnections = 20;
+//});
+
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
 
-//app.UseHttpsRedirection();
+app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 app.UseAntiforgery();
