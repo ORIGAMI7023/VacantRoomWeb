@@ -142,9 +142,8 @@ namespace VacantRoomWeb
                 var rowTime = row.Cell(14).GetString();         // N列：上课时间（如 周一 1-2节）
                 var rowWeeks = row.Cell(15).GetString();        // O列：起止周（如 1-16周全）
                 var room = row.Cell(16).GetString();            // P列：上课地点（如 B303）
-                var courseName = row.Cell(4).GetString();       // E列：课程名称
-                var teacher = row.Cell(7).GetString();          // H列：任课教师
-                var className = row.Cell(9).GetString();        // I列：教学班级
+                var courseName = row.Cell(5).GetString();       // E列：课程名称
+                var teacher = row.Cell(12).GetString();          // H列：任课教师
 
                 if (string.IsNullOrEmpty(room)) continue;
 
@@ -170,15 +169,19 @@ namespace VacantRoomWeb
                     TimeRange = timeRange,
                     CourseName = courseName,
                     Teacher = teacher,
-                    Class = className
                 });
             }
 
             // 按节次顺序排序
             var periodOrder = new Dictionary<string, int>
             {
-                { "1-2节", 1 }, { "3-4节", 2 }, { "5-6节", 3 },
-                { "7-8节", 4 }, { "9-10节", 5 }
+                { "1-2节", 1 }, { "01-02节", 1 },
+                { "3-4节", 2 }, { "03-04节", 2 },
+                { "5-6节", 3 }, { "05-06节", 3 },
+                { "7-8节", 4 }, { "07-08节", 4 },
+                { "9-10节", 5 }, { "09-10节", 5 },
+                { "9-11节", 6 }, { "09-11节", 6 },
+                { "10-11节", 7 }, { "10-12节", 8 }
             };
 
             return roomUsages.OrderBy(r => periodOrder.GetValueOrDefault(r.Period, 999)).ToList();
@@ -353,6 +356,5 @@ namespace VacantRoomWeb
         public string TimeRange { get; set; } = "";
         public string CourseName { get; set; } = "";
         public string Teacher { get; set; } = "";
-        public string Class { get; set; } = "";
     }
 }
