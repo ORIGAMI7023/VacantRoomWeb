@@ -5,11 +5,8 @@ using VacantRoomWeb.Components;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<VacantRoomService>();
 
-// Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
-
-
 
 //用于处理连接数统计的服务
 builder.Services.AddSingleton<ConnectionCounterService>(); 
@@ -17,6 +14,7 @@ builder.Services.AddSingleton<ClientConnectionTracker>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
 
+//使用IIS管理，不用Kestrel直接监听端口
 //builder.WebHost.ConfigureKestrel(options =>
 //{
 //    options.ListenAnyIP(80); 

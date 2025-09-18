@@ -81,9 +81,18 @@
     {
         <p style="color: gray;">请填写条件后点击查询</p>
     }
+
+
+
 </div>
-
-
+<!-- ======= 备案信息页脚 BEGIN ======= -->
+<footer class="text-center text-muted small py-3" style="white-space:nowrap;">
+    ©@(DateTime.Now.Year) origami7023.cn&nbsp;|&nbsp;
+    <a href="https://beian.miit.gov.cn/" target="_blank">
+        沪ICP备2025129900号-1
+    </a>
+</footer>
+<!-- ======= 备案信息页脚 END ======= -->
 @code {
     string Campus = "奉贤校区";
     string Weekday = "";
@@ -103,6 +112,57 @@
         new("教学楼：",   () => Building, v => Building = v, new() { ("所有", "所有"), ("A", "A"), ("B", "B"), ("C", "C"), ("D", "D") }),
         new("第几周：",   () => Week,     v => Week = v, Enumerable.Range(1, 18).Select(i => ($"第{i}周", $"第 {i} 周")).ToList())
     };
+
+
+    // —— 节次时间表（仅用于自动选择）——
+    // 规则：当前处于某一节次时，默认选中“下一段”；
+    // 若当日所有节次都结束，则默认选中“1-2节”（相当于明天的第一段）。
+    List<(TimeSpan Start, TimeSpan End, string Label)> PeriodSlots = new()
+    {
+        (new TimeSpan(8, 00, 00), new TimeSpan(9, 40, 00), "1-2节"),
+        (new TimeSpan(9, 55, 00), new TimeSpan(11, 35, 00), "3-4节"),
+        (new TimeSpan(13, 30, 00), new TimeSpan(15, 10, 00), "5-6节"),
+        (new TimeSpan(15, 25, 00), new TimeSpan(17, 05, 00), "7-8节"),
+        // 如果后续想支持 9-10 节，补一条时间段并把下拉框里“9-10节”对应起来
+        // (new TimeSpan(18, 30, 00), new TimeSpan(20, 10, 00), "9-10节"),
+    };
+
+    void SetDefaultPeriodByNow()
+    {
+        DateTime now = DateTime.Now;
+        TimeSpan t = now.TimeOfDay;
+
+        // 1) 如果当前时间在某一段内 → 选中下一段
+        for (int i = 0; i < PeriodSlots.Count; i++)
+        {
+            (TimeSpan Start, TimeSpan End, string Label) slot = PeriodSlots[i];
+
+            if (t >= slot.Start && t <= slot.End)
+            {
+                int nextIndex = i + 1;
+                if (nextIndex < PeriodSlots.Count)
+                {
+                    Period = PeriodSlots[nextIndex].Label;
+                }
+                else
+                {
+                    Period = "1-2节"; // 当日最后一段 → 选明天的第一段（这里仅设置节次，不改星期）
+                }
+                return;
+            }
+        }
+
+        // 2) 如果当前时间还没到当天第一段开始 → 选当天第一段
+        if (t < PeriodSlots[0].Start)
+        {
+            Period = PeriodSlots[0].Label;
+            return;
+        }
+
+        // 3) 如果已经晚于当日最后一段 → 选“1-2节”
+        Period = "1-2节";
+    }
+
 
 
     void QueryVacantRooms()
@@ -127,16 +187,20 @@
         };
 
         // 设置：第14周开始于 2025年5月27日（周二）
-        DateTime week14Start = new DateTime(2025, 5, 27);
+        DateTime week14Start = new DateTime(2025, 9, 8);
         int passedDays = (DateTime.Today - week14Start).Days;
         int weekOffset = passedDays / 7;
-        int currentWeekNumber = 14 + weekOffset;
+        int currentWeekNumber = 1 + weekOffset;
 
         // 限制范围 1~18
         if (currentWeekNumber < 1) currentWeekNumber = 1;
         if (currentWeekNumber > 18) currentWeekNumber = 18;
 
+        // 自动选择星期
         Week = $"第{currentWeekNumber}周";
+
+        // 默认节次设置
+        SetDefaultPeriodByNow();
     }
 
 }
