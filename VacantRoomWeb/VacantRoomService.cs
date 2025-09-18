@@ -47,10 +47,17 @@ namespace VacantRoomWeb
         private readonly Dictionary<string, string> PeriodTimeMap = new()
         {
             { "1-2节", "08:00-09:40" },
+            { "01-02节", "08:00-09:40" },
             { "3-4节", "09:55-11:35" },
+            { "03-04节", "09:55-11:35" },
             { "5-6节", "13:30-15:10" },
+            { "05-06节", "13:30-15:10" },
             { "7-8节", "15:25-17:05" },
-            { "9-10节", "18:30-20:10" }
+            { "07-08节", "15:25-17:05" },
+            { "9-10节", "18:00-19:35" },
+            { "09-10节", "18:00-19:35" },
+            { "9-11节", "18:00-20:30" },
+            { "09-11节", "18:00-20:30" }
         };
 
         public List<string> GetVacantRooms(string campus, string weekday, string period, string building, string week)
