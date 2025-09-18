@@ -22,7 +22,6 @@ namespace VacantRoomWeb
             _httpContextAccessor = httpContextAccessor;
         }
 
-
         List<string> list = new List<string> { "A101", "A102", "A103", "A104", "A105", "A106",
                                                "A201", "A202", "A203", "A204", "A205", "A206",
                                                "A301", "A302", "A303", "A304", "A305",
@@ -44,6 +43,16 @@ namespace VacantRoomWeb
                                                "D501", "D502", "D503", "D504", "D505", "D506", "D507", "D508",
                                                "E113", "E115", };
 
+        // Dictionary for period time mapping
+        private readonly Dictionary<string, string> PeriodTimeMap = new()
+        {
+            { "1-2节", "08:00-09:40" },
+            { "3-4节", "09:55-11:35" },
+            { "5-6节", "13:30-15:10" },
+            { "7-8节", "15:25-17:05" },
+            { "9-10节", "18:30-20:10" }
+        };
+
         public List<string> GetVacantRooms(string campus, string weekday, string period, string building, string week)
         {
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "未知IP";
@@ -53,8 +62,7 @@ namespace VacantRoomWeb
             Console.ForegroundColor = ConsoleColor.Yellow;//使用黄色字体
             Console.WriteLine("获取数据");
             Console.ResetColor(); // 恢复默认颜色
-            Console.WriteLine($"查询条件：{campus.Substring(0,2)} {weekday} {period} {building}教学楼 {week}");
-
+            Console.WriteLine($"查询条件：{campus.Substring(0, 2)} {weekday} {period} {building}教学楼 {week}");
 
             var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
             if (!File.Exists(filePath))
@@ -83,7 +91,7 @@ namespace VacantRoomWeb
                 // 时间段匹配（更强判断：节次区间是否覆盖）
                 if (!IsPeriodMatch(rowTime, weekday, period)) continue;
 
-                // 周次匹配（如“第1周”是否在“1-16周全”中）
+                // 周次匹配（如"第1周"是否在"1-16周全"中）
                 if (!IsWeekMatch(rowWeeks, week)) continue;
 
                 occupiedRooms.Add(room);
@@ -96,6 +104,140 @@ namespace VacantRoomWeb
                 .Where(r => !occupiedRooms.Contains(r) &&
                             (building == "所有" || r.StartsWith(building)))
                 .ToList();
+        }
+
+        // NEW METHOD: Get room usage for a specific room
+        public List<RoomUsage> GetRoomUsage(string campus, string roomNumber, string weekday, string week)
+        {
+            var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "未知IP";
+
+            Console.Write($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} ");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("查询教室使用情况");
+            Console.ResetColor();
+            Console.WriteLine($"查询条件：{campus.Substring(0, 2)} {roomNumber} {weekday} {week}");
+
+            var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
+            if (!File.Exists(filePath))
+            {
+                Console.WriteLine("文件未找到：" + filePath);
+                return new List<RoomUsage>();
+            }
+
+            var roomUsages = new List<RoomUsage>();
+
+            using var workbook = new XLWorkbook(filePath);
+            var sheet = workbook.Worksheets.First();
+
+            foreach (var row in sheet.RowsUsed().Skip(1)) // 跳过表头
+            {
+                var rowCampus = row.Cell(10).GetString();       // J列：排课校区
+                var rowTime = row.Cell(14).GetString();         // N列：上课时间（如 周一 1-2节）
+                var rowWeeks = row.Cell(15).GetString();        // O列：起止周（如 1-16周全）
+                var room = row.Cell(16).GetString();            // P列：上课地点（如 B303）
+                var courseName = row.Cell(4).GetString();       // E列：课程名称
+                var teacher = row.Cell(7).GetString();          // H列：任课教师
+                var className = row.Cell(9).GetString();        // I列：教学班级
+
+                if (string.IsNullOrEmpty(room)) continue;
+
+                // 校区匹配
+                if (rowCampus != campus) continue;
+
+                // 教室匹配
+                if (room != roomNumber) continue;
+
+                // 星期匹配
+                if (!IsWeekdayMatch(rowTime, weekday)) continue;
+
+                // 周次匹配
+                if (!IsWeekMatch(rowWeeks, week)) continue;
+
+                // 提取节次信息
+                var period = ExtractPeriodFromTime(rowTime);
+                var timeRange = GetTimeRangeForPeriod(period);
+
+                roomUsages.Add(new RoomUsage
+                {
+                    Period = period,
+                    TimeRange = timeRange,
+                    CourseName = courseName,
+                    Teacher = teacher,
+                    Class = className
+                });
+            }
+
+            // 按节次顺序排序
+            var periodOrder = new Dictionary<string, int>
+            {
+                { "1-2节", 1 }, { "3-4节", 2 }, { "5-6节", 3 },
+                { "7-8节", 4 }, { "9-10节", 5 }
+            };
+
+            return roomUsages.OrderBy(r => periodOrder.GetValueOrDefault(r.Period, 999)).ToList();
+        }
+
+        // NEW METHOD: Get available rooms for a building (for the dropdown)
+        public List<string> GetRoomsForBuilding(string building)
+        {
+            if (string.IsNullOrEmpty(building)) return new List<string>();
+
+            return list.Where(r => r.StartsWith(building))
+                      .Select(r => r.Substring(1)) // Remove building letter (A101 -> 101)
+                      .Distinct()
+                      .OrderBy(r => r)
+                      .ToList();
+        }
+
+        // Helper method to check weekday match
+        private bool IsWeekdayMatch(string rowTime, string selectedWeekday)
+        {
+            string ExtractWeekday(string text)
+            {
+                if (text.StartsWith("周") && text.Length >= 2)
+                    return text.Substring(0, 2); // 如 "周三"
+                return "";
+            }
+
+            return ExtractWeekday(rowTime) == ExtractWeekday(selectedWeekday);
+        }
+
+        // Helper method to extract period from time string
+        private string ExtractPeriodFromTime(string rowTime)
+        {
+            // Extract period range from time string like "周三 9-10节" -> "9-10节"
+            var parts = rowTime.Split(' ');
+            if (parts.Length > 1)
+            {
+                var periodPart = parts[1];
+                if (periodPart.EndsWith("节"))
+                {
+                    return periodPart;
+                }
+                else
+                {
+                    return periodPart + "节";
+                }
+            }
+            return "";
+        }
+
+        // Helper method to get time range for a period
+        private string GetTimeRangeForPeriod(string period)
+        {
+            // Normalize period format
+            period = period.Replace("节", "");
+            if (!period.Contains("-"))
+            {
+                // Handle single periods like "1" -> "1-1"
+                if (int.TryParse(period, out int num))
+                {
+                    period = $"{num}-{num}";
+                }
+            }
+            period += "节";
+
+            return PeriodTimeMap.GetValueOrDefault(period, "时间未知");
         }
 
         private bool IsWeekMatch(string rowWeeks, string selectedWeek)
@@ -148,13 +290,11 @@ namespace VacantRoomWeb
             return true;
         }
 
-
-
         private bool IsPeriodMatch(string rowTime, string selectedWeekday, string selectedPeriod)
         {
             string Normalize(string text) => text.Replace("节", "").Replace(" ", "");
 
-            // 提取“周几”和“节次范围”
+            // 提取"周几"和"节次范围"
             string ExtractWeekday(string text)
             {
                 if (text.StartsWith("周") && text.Length >= 2)
@@ -197,9 +337,15 @@ namespace VacantRoomWeb
 
             return false;
         }
-
-
     }
 
-
+    // NEW CLASS: Room usage data model
+    public class RoomUsage
+    {
+        public string Period { get; set; } = "";
+        public string TimeRange { get; set; } = "";
+        public string CourseName { get; set; } = "";
+        public string Teacher { get; set; } = "";
+        public string Class { get; set; } = "";
+    }
 }

@@ -1,0 +1,1475 @@
+================================================================================
+VACANTROOM WEB PROJECT - ALL CODE FILES
+================================================================================
+
+
+============================================================
+FILE: ClientConnectionTracker.cs
+============================================================
+﻿namespace VacantRoomWeb
+{
+    /// <summary>
+    /// 用于在用户连接时记录 IP，在断开时查出对应 IP
+    /// </summary>
+    public class ClientConnectionTracker
+    {
+        private readonly Dictionary<string, string> _ipMap = new();
+        private readonly object _lock = new();
+
+        public void SetClientIp(string circuitId, string ip)
+        {
+            lock (_lock)
+            {
+                _ipMap[circuitId] = ip;
+            }
+        }
+
+        public string? GetClientIp(string circuitId)
+        {
+            lock (_lock)
+            {
+                return _ipMap.TryGetValue(circuitId, out var ip) ? ip : null;
+            }
+        }
+
+        public void Remove(string circuitId)
+        {
+            lock (_lock)
+            {
+                _ipMap.Remove(circuitId);
+            }
+        }
+    }
+
+}
+
+
+
+============================================================
+FILE: Components\App.razor
+============================================================
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="bootstrap/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="VacantRoomWeb.styles.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>
+
+
+
+============================================================
+FILE: Components\Layout\MainLayout.razor
+============================================================
+﻿@inherits LayoutComponentBase
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+
+    </main>
+</div>
+
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
+</div>
+
+
+
+============================================================
+FILE: Components\Layout\NavMenu.razor
+============================================================
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">VacantRoomWeb</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="">
+                <span class="oi oi-list-rich" aria-hidden="true"></span> 空教室查询
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="counter">
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="weather">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
+            </NavLink>
+        </div>
+    </nav>
+</div>
+
+
+============================================================
+FILE: Components\Pages\Counter.razor
+============================================================
+﻿@page "/counter"
+@rendermode InteractiveServer
+
+<PageTitle>Counter</PageTitle>
+
+<h1>Counter</h1>
+
+<p role="status">Current count: @currentCount</p>
+
+<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+
+@code {
+    private int currentCount = 0;
+
+    private void IncrementCount()
+    {
+        currentCount++;
+    }
+}
+
+
+
+============================================================
+FILE: Components\Pages\Error.razor
+============================================================
+﻿@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Error</PageTitle>
+
+<h1 class="text-danger">Error.</h1>
+<h2 class="text-danger">An error occurred while processing your request.</h2>
+
+@if (ShowRequestId)
+{
+    <p>
+        <strong>Request ID:</strong> <code>@RequestId</code>
+    </p>
+}
+
+<h3>Development Mode</h3>
+<p>
+    Swapping to <strong>Development</strong> environment will display more detailed information about the error that occurred.
+</p>
+<p>
+    <strong>The Development environment shouldn't be enabled for deployed applications.</strong>
+    It can result in displaying sensitive information from exceptions to end users.
+    For local debugging, enable the <strong>Development</strong> environment by setting the <strong>ASPNETCORE_ENVIRONMENT</strong> environment variable to <strong>Development</strong>
+    and restarting the app.
+</p>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}
+
+
+
+============================================================
+FILE: Components\Pages\VacantRoom - 副本.razor
+============================================================
+﻿@page "/"
+@rendermode InteractiveServer
+@inject VacantRoomService VacantService
+
+<h3 style="margin-bottom: 1rem;">空教室查询</h3>
+<p style="font-size: 1.1rem; color: gray;">@TodayText</p>
+
+<div style="max-width: 400px;">
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">校区：</label>
+        <select @bind="Campus" style="width: 200px;">
+            <option value="奉贤校区">奉贤</option>
+            <option value="徐汇校区">徐汇</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">星期：</label>
+        <select @bind="Weekday" style="width: 200px;">
+            <option>周一</option>
+            <option>周二</option>
+            <option>周三</option>
+            <option>周四</option>
+            <option>周五</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">节次：</label>
+        <select @bind="Period" style="width: 200px;">
+            <option>1-2节</option>
+            <option>3-4节</option>
+            <option>5-6节</option>
+            <option>7-8节</option>
+            <option>9-10节</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">教学楼：</label>
+        <select @bind="Building" style="width: 200px;">
+            <option>所有</option>
+            <option>A</option>
+            <option>B</option>
+            <option>C</option>
+            <option>D</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label style="display: inline-block; width: 80px;">第几周：</label>
+        <select @bind="Week" style="width: 200px;">
+            @for (int i = 1; i <= 18; i++)
+            {
+                <option value="@($"第{i}周")">第 @i 周</option>
+            }
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <button @onclick="QueryVacantRooms" style="padding: 6px 12px; font-weight: bold;">
+            查询空教室
+        </button>
+    </div>
+
+    <hr />
+
+    <p style="color: red;">[Debug]当前选中： @Campus, @Weekday, @Period, @Building, @Week</p>
+
+    @if (Result != null)
+    {
+        <p style="color: orange;">[Debug]共查询到 @Result.Count 教室</p>
+        <ul>
+            @foreach (var room in Result)
+            {
+                <li>@room</li>
+            }
+        </ul>
+    }
+    else
+    {
+        <p style="color: gray;">请填写条件后点击查询</p>
+    }
+
+
+
+</div>
+<!-- ======= 备案信息页脚 BEGIN ======= -->
+<footer class="text-center text-muted small py-3" style="white-space:nowrap;">
+    ©@(DateTime.Now.Year) origami7023.cn&nbsp;|&nbsp;
+    <a href="https://beian.miit.gov.cn/" target="_blank">
+        沪ICP备2025129900号-1
+    </a>
+</footer>
+<!-- ======= 备案信息页脚 END ======= -->
+@code {
+    string Campus = "奉贤校区";
+    string Weekday = "";
+    string Period = "1-2节";
+    string Building = "所有";
+    string Week = "第1周";
+
+    List<string> Result;
+    string TodayText;
+
+    record SelectItem(string Label, Func<string> Get, Action<string> Set, List<(string Value, string Text)> Options);
+    List<SelectItem> selectors => new()
+    {
+        new("校区：",     () => Campus,   v => Campus = v, new() { ("奉贤校区", "奉贤"), ("徐汇校区", "徐汇") }),
+        new("星期：",     () => Weekday,  v => Weekday = v, new() { ("周一", "周一"), ("周二", "周二"), ("周三", "周三"), ("周四", "周四"), ("周五", "周五") }),
+        new("节次：",     () => Period,   v => Period = v, new() { ("1-2节", "1-2节"), ("3-4节", "3-4节"), ("5-6节", "5-6节"), ("7-8节", "7-8节"), ("9-10节", "9-10节") }),
+        new("教学楼：",   () => Building, v => Building = v, new() { ("所有", "所有"), ("A", "A"), ("B", "B"), ("C", "C"), ("D", "D") }),
+        new("第几周：",   () => Week,     v => Week = v, Enumerable.Range(1, 18).Select(i => ($"第{i}周", $"第 {i} 周")).ToList())
+    };
+
+
+    // —— 节次时间表（仅用于自动选择）——
+    // 规则：当前处于某一节次时，默认选中“下一段”；
+    // 若当日所有节次都结束，则默认选中“1-2节”（相当于明天的第一段）。
+    List<(TimeSpan Start, TimeSpan End, string Label)> PeriodSlots = new()
+    {
+        (new TimeSpan(8, 00, 00), new TimeSpan(9, 40, 00), "1-2节"),
+        (new TimeSpan(9, 55, 00), new TimeSpan(11, 35, 00), "3-4节"),
+        (new TimeSpan(13, 30, 00), new TimeSpan(15, 10, 00), "5-6节"),
+        (new TimeSpan(15, 25, 00), new TimeSpan(17, 05, 00), "7-8节"),
+        // 如果后续想支持 9-10 节，补一条时间段并把下拉框里“9-10节”对应起来
+        // (new TimeSpan(18, 30, 00), new TimeSpan(20, 10, 00), "9-10节"),
+    };
+
+    void SetDefaultPeriodByNow()
+    {
+        DateTime now = DateTime.Now;
+        TimeSpan t = now.TimeOfDay;
+
+        // 1) 如果当前时间在某一段内 → 选中下一段
+        for (int i = 0; i < PeriodSlots.Count; i++)
+        {
+            (TimeSpan Start, TimeSpan End, string Label) slot = PeriodSlots[i];
+
+            if (t >= slot.Start && t <= slot.End)
+            {
+                int nextIndex = i + 1;
+                if (nextIndex < PeriodSlots.Count)
+                {
+                    Period = PeriodSlots[nextIndex].Label;
+                }
+                else
+                {
+                    Period = "1-2节"; // 当日最后一段 → 选明天的第一段（这里仅设置节次，不改星期）
+                }
+                return;
+            }
+        }
+
+        // 2) 如果当前时间还没到当天第一段开始 → 选当天第一段
+        if (t < PeriodSlots[0].Start)
+        {
+            Period = PeriodSlots[0].Label;
+            return;
+        }
+
+        // 3) 如果已经晚于当日最后一段 → 选“1-2节”
+        Period = "1-2节";
+    }
+
+
+
+    void QueryVacantRooms()
+    {
+        Result = VacantService.GetVacantRooms(Campus, Weekday, Period, Building, Week);
+    }
+
+    protected override void OnInitialized()
+    {
+        // 默认星期几设置
+        var today = DateTime.Today.DayOfWeek;
+        TodayText = DateTime.Today.ToString("D");
+
+        Weekday = today switch
+        {
+            DayOfWeek.Monday => "周一",
+            DayOfWeek.Tuesday => "周二",
+            DayOfWeek.Wednesday => "周三",
+            DayOfWeek.Thursday => "周四",
+            DayOfWeek.Friday => "周五",
+            _ => "周一"
+        };
+
+        // 设置：第14周开始于 2025年5月27日（周二）
+        DateTime week14Start = new DateTime(2025, 9, 8);
+        int passedDays = (DateTime.Today - week14Start).Days;
+        int weekOffset = passedDays / 7;
+        int currentWeekNumber = 1 + weekOffset;
+
+        // 限制范围 1~18
+        if (currentWeekNumber < 1) currentWeekNumber = 1;
+        if (currentWeekNumber > 18) currentWeekNumber = 18;
+
+        // 自动选择星期
+        Week = $"第{currentWeekNumber}周";
+
+        // 默认节次设置
+        SetDefaultPeriodByNow();
+    }
+
+}
+
+
+
+============================================================
+FILE: Components\Pages\VacantRoom.razor
+============================================================
+﻿@page "/"
+@rendermode InteractiveServer
+@inject VacantRoomService VacantService
+
+<h3 style="margin-bottom: 1rem;">教室查询系统</h3>
+<p style="font-size: 1.1rem; color: gray;">@TodayText</p>
+
+<!-- Tab Navigation -->
+<div style="margin-bottom: 2rem;">
+    <button @onclick="() => SetActiveTab(0)"
+            style="@GetTabStyle(0)">
+        空教室查询
+    </button>
+    <button @onclick="() => SetActiveTab(1)"
+            style="@GetTabStyle(1)">
+        教室使用情况查询
+    </button>
+</div>
+
+<div style="max-width: 500px;">
+
+    @if (ActiveTab == 0)
+    {
+        <!-- 空教室查询 -->
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">校区：</label>
+            <select @bind="Campus" style="width: 200px;">
+                <option value="奉贤校区">奉贤</option>
+                <option value="徐汇校区">徐汇</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">星期：</label>
+            <select @bind="Weekday" style="width: 200px;">
+                <option>周一</option>
+                <option>周二</option>
+                <option>周三</option>
+                <option>周四</option>
+                <option>周五</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">节次：</label>
+            <select @bind="Period" style="width: 200px;">
+                <option>1-2节</option>
+                <option>3-4节</option>
+                <option>5-6节</option>
+                <option>7-8节</option>
+                <option>9-10节</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">教学楼：</label>
+            <select @bind="Building" style="width: 200px;">
+                <option>所有</option>
+                <option>A</option>
+                <option>B</option>
+                <option>C</option>
+                <option>D</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">第几周：</label>
+            <select @bind="Week" style="width: 200px;">
+                @for (int i = 1; i <= 18; i++)
+                {
+                    <option value="@($"第{i}周")">第 @i 周</option>
+                }
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <button @onclick="QueryVacantRooms" style="padding: 8px 16px; font-weight: bold; background-color: #007bff; color: white; border: none; border-radius: 4px;">
+                查询空教室
+            </button>
+        </div>
+
+        <hr />
+
+        <p style="color: red;">[Debug]当前选中： @Campus, @Weekday, @Period, @Building, @Week</p>
+
+        @if (VacantResult != null)
+        {
+            <p style="color: orange;">[Debug]共查询到 @VacantResult.Count 个空教室</p>
+            <div style="max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; border-radius: 4px;">
+                <ul style="margin: 0; padding-left: 20px;">
+                    @foreach (var room in VacantResult)
+                    {
+                        <li>@room</li>
+                    }
+                </ul>
+            </div>
+        }
+        else
+        {
+            <p style="color: gray;">请填写条件后点击查询</p>
+        }
+    }
+    else
+    {
+        <!-- 教室使用情况查询 -->
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">校区：</label>
+            <select @bind="RoomCampus" style="width: 200px;">
+                <option value="奉贤校区">奉贤</option>
+                <option value="徐汇校区">徐汇</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">教学楼：</label>
+            <select value="@RoomBuilding" @onchange="OnBuildingChanged" style="width: 200px;">
+                <option value="">请选择教学楼</option>
+                <option value="A">A楼</option>
+                <option value="B">B楼</option>
+                <option value="C">C楼</option>
+                <option value="D">D楼</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">教室号：</label>
+            <select @bind="RoomNumber" style="width: 200px;" disabled="@string.IsNullOrEmpty(RoomBuilding)">
+                @if (string.IsNullOrEmpty(RoomBuilding))
+                {
+                    <option value="">请先选择教学楼</option>
+                }
+                else
+                {
+                    <option value="">请选择教室</option>
+                    @foreach (var room in GetRoomsForBuilding(RoomBuilding))
+                    {
+                        <option value="@room">@room</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">星期：</label>
+            <select @bind="RoomWeekday" style="width: 200px;">
+                <option>周一</option>
+                <option>周二</option>
+                <option>周三</option>
+                <option>周四</option>
+                <option>周五</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: inline-block; width: 80px;">第几周：</label>
+            <select @bind="RoomWeek" style="width: 200px;">
+                @for (int i = 1; i <= 18; i++)
+                {
+                    <option value="@($"第{i}周")">第 @i 周</option>
+                }
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <button @onclick="QueryRoomUsage"
+                    disabled="@string.IsNullOrEmpty(RoomNumber)"
+                    style="padding: 8px 16px; font-weight: bold; background-color: #28a745; color: white; border: none; border-radius: 4px; opacity: @(string.IsNullOrEmpty(RoomNumber) ? "0.5" : "1");">
+                查询教室使用情况
+            </button>
+        </div>
+
+        <hr />
+
+        <p style="color: red;">[Debug]当前选中： @RoomCampus, @RoomBuilding @RoomNumber, @RoomWeekday, @RoomWeek</p>
+
+        @if (UsageResult != null)
+        {
+            <div style="border: 1px solid #ccc; border-radius: 4px; padding: 15px; background-color: #f8f9fa;">
+                <h4 style="margin-top: 0; color: #495057;">@RoomBuilding@RoomNumber 教室使用情况</h4>
+                <p style="color: #6c757d; margin-bottom: 15px;">@RoomCampus · @RoomWeekday · @RoomWeek</p>
+
+                @if (UsageResult.Count == 0)
+                {
+                    <p style="color: green; font-weight: bold;">✅ 该教室当天全天空闲</p>
+                }
+                else
+                {
+                    <div style="display: grid; gap: 8px;">
+                        @foreach (var usage in UsageResult)
+                        {
+                            <div style="background-color: white; padding: 12px; border-radius: 4px; border-left: 4px solid #dc3545;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-weight: bold; color: #dc3545;">@usage.Period</span>
+                                    <span style="font-size: 0.9em; color: #6c757d;">@usage.TimeRange</span>
+                                </div>
+                                <div style="margin-top: 4px; color: #495057;">
+                                    <strong>课程：</strong>@usage.CourseName
+                                </div>
+                                @if (!string.IsNullOrEmpty(usage.Teacher))
+                                {
+                                    <div style="font-size: 0.9em; color: #6c757d;">
+                                        <strong>教师：</strong>@usage.Teacher
+                                    </div>
+                                }
+                                @if (!string.IsNullOrEmpty(usage.Class))
+                                {
+                                    <div style="font-size: 0.9em; color: #6c757d;">
+                                        <strong>班级：</strong>@usage.Class
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <p style="color: gray;">请选择教室后点击查询</p>
+        }
+    }
+
+</div>
+
+<!-- ======= 备案信息页脚 BEGIN ======= -->
+<footer class="text-center text-muted small py-3" style="white-space:nowrap;">
+    ©@(DateTime.Now.Year) origami7023.cn&nbsp;|&nbsp;
+    <a href="https://beian.miit.gov.cn/" target="_blank">
+        沪ICP备2025129900号-1
+    </a>
+</footer>
+<!-- ======= 备案信息页脚 END ======= -->
+@code {
+    // Tab management
+    int ActiveTab = 0;
+
+    // 空教室查询相关变量
+    string Campus = "奉贤校区";
+    string Weekday = "";
+    string Period = "1-2节";
+    string Building = "所有";
+    string Week = "第1周";
+    List<string> VacantResult;
+
+    // 教室使用情况查询相关变量
+    string RoomCampus = "奉贤校区";
+    string RoomBuilding = "";
+    string RoomNumber = "";
+    string RoomWeekday = "";
+    string RoomWeek = "第1周";
+    List<VacantRoomWeb.RoomUsage> UsageResult;
+
+    string TodayText;
+
+    // RoomUsage class is now in VacantRoomService.cs
+
+    void SetActiveTab(int tabIndex)
+    {
+        ActiveTab = tabIndex;
+        // 切换标签时清空结果
+        if (tabIndex == 0)
+        {
+            UsageResult = null;
+        }
+        else
+        {
+            VacantResult = null;
+        }
+    }
+
+    string GetTabStyle(int tabIndex)
+    {
+        var baseStyle = "padding: 10px 20px; margin-right: 5px; border: 1px solid #ccc; border-radius: 4px 4px 0 0; cursor: pointer; background-color: ";
+        return baseStyle + (ActiveTab == tabIndex ? "#007bff; color: white;" : "#f8f9fa; color: #495057;");
+    }
+
+    // —— 节次时间表（仅用于自动选择）——
+    List<(TimeSpan Start, TimeSpan End, string Label)> PeriodSlots = new()
+    {
+        (new TimeSpan(8, 00, 00), new TimeSpan(9, 40, 00), "1-2节"),
+        (new TimeSpan(9, 55, 00), new TimeSpan(11, 35, 00), "3-4节"),
+        (new TimeSpan(13, 30, 00), new TimeSpan(15, 10, 00), "5-6节"),
+        (new TimeSpan(15, 25, 00), new TimeSpan(17, 05, 00), "7-8节"),
+        (new TimeSpan(18, 30, 00), new TimeSpan(20, 10, 00), "9-10节"),
+    };
+
+    Dictionary<string, string> PeriodTimeMap = new()
+    {
+        { "1-2节", "08:00-09:40" },
+        { "3-4节", "09:55-11:35" },
+        { "5-6节", "13:30-15:10" },
+        { "7-8节", "15:25-17:05" },
+        { "9-10节", "18:30-20:10" }
+    };
+
+    void SetDefaultPeriodByNow()
+    {
+        DateTime now = DateTime.Now;
+        TimeSpan t = now.TimeOfDay;
+
+        for (int i = 0; i < PeriodSlots.Count; i++)
+        {
+            (TimeSpan Start, TimeSpan End, string Label) slot = PeriodSlots[i];
+
+            if (t >= slot.Start && t <= slot.End)
+            {
+                int nextIndex = i + 1;
+                if (nextIndex < PeriodSlots.Count)
+                {
+                    Period = PeriodSlots[nextIndex].Label;
+                }
+                else
+                {
+                    Period = "1-2节";
+                }
+                return;
+            }
+        }
+
+        if (t < PeriodSlots[0].Start)
+        {
+            Period = PeriodSlots[0].Label;
+            return;
+        }
+
+        Period = "1-2节";
+    }
+
+    void QueryVacantRooms()
+    {
+        VacantResult = VacantService.GetVacantRooms(Campus, Weekday, Period, Building, Week);
+    }
+
+    void QueryRoomUsage()
+    {
+        if (string.IsNullOrEmpty(RoomNumber)) return;
+
+        // 调用服务获取教室使用情况
+        UsageResult = VacantService.GetRoomUsage(RoomCampus, RoomBuilding + RoomNumber, RoomWeekday, RoomWeek);
+    }
+
+    void OnBuildingChanged(ChangeEventArgs e)
+    {
+        RoomBuilding = e.Value?.ToString() ?? "";
+        RoomNumber = ""; // 清空教室号选择
+    }
+
+    List<string> GetRoomsForBuilding(string building)
+    {
+        // 使用服务获取实际的教室列表
+        return VacantService.GetRoomsForBuilding(building);
+    }
+
+    protected override void OnInitialized()
+    {
+        var today = DateTime.Today.DayOfWeek;
+        TodayText = DateTime.Today.ToString("D");
+
+        string todayWeekday = today switch
+        {
+            DayOfWeek.Monday => "周一",
+            DayOfWeek.Tuesday => "周二",
+            DayOfWeek.Wednesday => "周三",
+            DayOfWeek.Thursday => "周四",
+            DayOfWeek.Friday => "周五",
+            _ => "周一"
+        };
+
+        Weekday = todayWeekday;
+        RoomWeekday = todayWeekday;
+
+        DateTime week14Start = new DateTime(2025, 9, 8);
+        int passedDays = (DateTime.Today - week14Start).Days;
+        int weekOffset = passedDays / 7;
+        int currentWeekNumber = 1 + weekOffset;
+
+        if (currentWeekNumber < 1) currentWeekNumber = 1;
+        if (currentWeekNumber > 18) currentWeekNumber = 18;
+
+        Week = $"第{currentWeekNumber}周";
+        RoomWeek = $"第{currentWeekNumber}周";
+
+        SetDefaultPeriodByNow();
+    }
+}
+
+
+============================================================
+FILE: Components\Pages\Weather.razor
+============================================================
+﻿@page "/weather"
+@attribute [StreamRendering]
+
+<PageTitle>Weather</PageTitle>
+
+<h1>Weather</h1>
+
+<p>This component demonstrates showing data.</p>
+
+@if (forecasts == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Temp. (C)</th>
+                <th>Temp. (F)</th>
+                <th>Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var forecast in forecasts)
+            {
+                <tr>
+                    <td>@forecast.Date.ToShortDateString()</td>
+                    <td>@forecast.TemperatureC</td>
+                    <td>@forecast.TemperatureF</td>
+                    <td>@forecast.Summary</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private WeatherForecast[]? forecasts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Simulate asynchronous loading to demonstrate streaming rendering
+        await Task.Delay(500);
+
+        var startDate = DateOnly.FromDateTime(DateTime.Now);
+        var summaries = new[] { "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching" };
+        forecasts = Enumerable.Range(1, 5).Select(index => new WeatherForecast
+        {
+            Date = startDate.AddDays(index),
+            TemperatureC = Random.Shared.Next(-20, 55),
+            Summary = summaries[Random.Shared.Next(summaries.Length)]
+        }).ToArray();
+    }
+
+    private class WeatherForecast
+    {
+        public DateOnly Date { get; set; }
+        public int TemperatureC { get; set; }
+        public string? Summary { get; set; }
+        public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    }
+}
+
+
+
+============================================================
+FILE: Components\Routes.razor
+============================================================
+﻿<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+
+
+
+============================================================
+FILE: Components\_Imports.razor
+============================================================
+﻿@using System.Net.Http
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Web
+@using static Microsoft.AspNetCore.Components.Web.RenderMode
+@using Microsoft.AspNetCore.Components.Web.Virtualization
+@using Microsoft.JSInterop
+@using VacantRoomWeb
+@using VacantRoomWeb.Components
+
+
+
+============================================================
+FILE: ConnectionCounterService.cs
+============================================================
+﻿namespace VacantRoomWeb
+{
+    /// <summary>
+    /// 维护当前在线连接数
+    /// </summary>
+    public class ConnectionCounterService
+    {
+        private int _count = 0;
+
+        public int Increment()
+        {
+            return Interlocked.Increment(ref _count);
+        }
+
+        public int Decrement()
+        {
+            return Interlocked.Decrement(ref _count);
+        }
+
+        public int GetCount()
+        {
+            return _count;
+        }
+    }
+
+}
+
+
+
+============================================================
+FILE: ConnectionLoggingCircuitHandler.cs
+============================================================
+﻿using Microsoft.AspNetCore.Components.Server.Circuits;
+using VacantRoomWeb;
+
+/// <summary>
+/// 用于处理连接数统计和获取客户端IP的核心事件处理器
+/// </summary>
+public class ConnectionLoggingCircuitHandler : CircuitHandler
+{
+    private readonly ConnectionCounterService _counter;
+    private readonly ClientConnectionTracker _ipTracker;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public ConnectionLoggingCircuitHandler(
+        ConnectionCounterService counter,
+        ClientConnectionTracker ipTracker,
+        IHttpContextAccessor httpContextAccessor)
+    {
+        _counter = counter;
+        _ipTracker = ipTracker;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    public override Task OnConnectionUpAsync(Circuit circuit, CancellationToken cancellationToken)
+    {
+        var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "未知IP";
+
+        _ipTracker.SetClientIp(circuit.Id, ip);
+
+        var count = _counter.Increment();
+        Console.WriteLine($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} 已连接 当前连接数：{count}");
+
+        return Task.CompletedTask;
+    }
+
+    public override Task OnConnectionDownAsync(Circuit circuit, CancellationToken cancellationToken)
+    {
+        var ip = _ipTracker.GetClientIp(circuit.Id);
+
+        // 只有记录过 IP（即该连接是我们关注的）才执行移除和递减
+        if (ip != null)
+        {
+            _ipTracker.Remove(circuit.Id);
+            var count = _counter.Decrement();
+            Console.WriteLine($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} 已断开 当前连接数：{count}");
+        }
+        else
+        {
+            // 跳过无效断开事件的递减，但仍可记录日志
+            Console.WriteLine($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: 未知IP        忽略断开事件");
+        }
+
+        return Task.CompletedTask;
+    }
+
+
+}
+
+
+============================================================
+FILE: Program.cs
+============================================================
+using Microsoft.AspNetCore.Components.Server.Circuits;
+using VacantRoomWeb;
+using VacantRoomWeb.Components;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<VacantRoomService>();
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+//ÓÃÓÚ´¦ÀíÁ¬½ÓÊýÍ³¼ÆµÄ·þÎñ
+builder.Services.AddSingleton<ConnectionCounterService>(); 
+builder.Services.AddSingleton<ClientConnectionTracker>();
+builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
+
+//Ê¹ÓÃIIS¹ÜÀí£¬²»ÓÃKestrelÖ±½Ó¼àÌý¶Ë¿Ú
+//builder.WebHost.ConfigureKestrel(options =>
+//{
+//    options.ListenAnyIP(80); 
+//    options.ListenAnyIP(443, listen =>
+//    {
+//        const string pfxPath = @"C:\Users\Administrator\Desktop\scs1750424505694_origami7023.cn_IIS\scs1750424505694_origami7023.cn_server.pfx";
+//        const string pfxPwd = "Kn9?cgGxZ9xxXBEf";      
+
+//        listen.UseHttps(pfxPath, pfxPwd);
+//    });
+
+//    options.Limits.MaxConcurrentConnections = 20;
+//    options.Limits.MaxConcurrentUpgradedConnections = 20;
+//});
+
+
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    app.UseHsts();
+}
+
+
+app.UseHttpsRedirection();
+
+app.UseStaticFiles();
+app.UseAntiforgery();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.Run();
+
+
+
+============================================================
+FILE: VacantRoomService.cs
+============================================================
+﻿using ClosedXML.Excel;
+using Microsoft.AspNetCore.Components.Server.Circuits;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+namespace VacantRoomWeb
+{
+    public class VacantRoomService
+    {
+        private readonly ConnectionCounterService _counter;
+        private readonly ClientConnectionTracker _ipTracker;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public VacantRoomService(
+            ConnectionCounterService counter,
+            ClientConnectionTracker ipTracker,
+            IHttpContextAccessor httpContextAccessor)
+        {
+            _counter = counter;
+            _ipTracker = ipTracker;
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        List<string> list = new List<string> { "A101", "A102", "A103", "A104", "A105", "A106",
+                                               "A201", "A202", "A203", "A204", "A205", "A206",
+                                               "A301", "A302", "A303", "A304", "A305",
+                                               "A401", "A402", "A403", "A404", "A405", "A406",
+                                               "B101", "B102", "B103", "B104", "B105", "B106", "B107", "B108",
+                                               "B201", "B202", "B203", "B204", "B205", "B206", "B207", "B208",
+                                               "B301", "B302", "B303", "B304", "B305", "B306", "B307", "B308",
+                                               "B401", "B402", "B403", "B404", "B405", "B406", "B407", "B408",
+                                               "B501", "B502", "B503", "B504", "B505", "B506", "B507", "B508",
+                                               "C101", "C102", "C103", "C104", "C105", "C106", "C107", "C108",
+                                               "C200", "C201", "C202", "C203", "C204", "C205", "C206", "C207", "C208",
+                                               "C301", "C302", "C303", "C304", "C305", "C306", "C307", "C308",
+                                               "C401", "C402", "C403", "C404", "C405", "C406", "C407", "C408",
+                                               "C501", "C502", "C503", "C504", "C505", "C506", "C507", "C508",
+                                               "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D108",
+                                               "D201", "D202", "D203", "D204", "D205", "D206", "D207", "D208",
+                                               "D301", "D302", "D303", "D304", "D305", "D306", "D307", "D308",
+                                               "D401", "D402", "D403", "D404", "D405", "D406", "D407", "D408",
+                                               "D501", "D502", "D503", "D504", "D505", "D506", "D507", "D508",
+                                               "E113", "E115", };
+
+        // Dictionary for period time mapping
+        private readonly Dictionary<string, string> PeriodTimeMap = new()
+        {
+            { "1-2节", "08:00-09:40" },
+            { "3-4节", "09:55-11:35" },
+            { "5-6节", "13:30-15:10" },
+            { "7-8节", "15:25-17:05" },
+            { "9-10节", "18:30-20:10" }
+        };
+
+        public List<string> GetVacantRooms(string campus, string weekday, string period, string building, string week)
+        {
+            var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "未知IP";
+
+            Console.Write($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} ");
+
+            Console.ForegroundColor = ConsoleColor.Yellow;//使用黄色字体
+            Console.WriteLine("获取数据");
+            Console.ResetColor(); // 恢复默认颜色
+            Console.WriteLine($"查询条件：{campus.Substring(0, 2)} {weekday} {period} {building}教学楼 {week}");
+
+            var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
+            if (!File.Exists(filePath))
+            {
+                Console.WriteLine("文件未找到：" + filePath);
+                return new List<string>();
+            }
+
+            var occupiedRooms = new HashSet<string>();
+
+            using var workbook = new XLWorkbook(filePath);
+            var sheet = workbook.Worksheets.First();
+
+            foreach (var row in sheet.RowsUsed().Skip(1)) // 跳过表头
+            {
+                var rowCampus = row.Cell(10).GetString();       // J列：排课校区
+                var rowTime = row.Cell(14).GetString();         // N列：上课时间（如 周一 1-2节）
+                var rowWeeks = row.Cell(15).GetString();        // O列：起止周（如 1-16周全）
+                var room = row.Cell(16).GetString();            // P列：上课地点（如 B303）
+
+                if (!room.Any()) continue;
+
+                // 校区匹配
+                if (rowCampus != campus) continue;
+
+                // 时间段匹配（更强判断：节次区间是否覆盖）
+                if (!IsPeriodMatch(rowTime, weekday, period)) continue;
+
+                // 周次匹配（如"第1周"是否在"1-16周全"中）
+                if (!IsWeekMatch(rowWeeks, week)) continue;
+
+                occupiedRooms.Add(room);
+            }
+
+            // 可扩展为动态提取所有教室
+            var allRooms = list;
+
+            return allRooms
+                .Where(r => !occupiedRooms.Contains(r) &&
+                            (building == "所有" || r.StartsWith(building)))
+                .ToList();
+        }
+
+        // NEW METHOD: Get room usage for a specific room
+        public List<RoomUsage> GetRoomUsage(string campus, string roomNumber, string weekday, string week)
+        {
+            var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "未知IP";
+
+            Console.Write($"{DateTime.Now:yyyy/M/d HH:mm:ss} IP: {ip,-16} ");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("查询教室使用情况");
+            Console.ResetColor();
+            Console.WriteLine($"查询条件：{campus.Substring(0, 2)} {roomNumber} {weekday} {week}");
+
+            var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
+            if (!File.Exists(filePath))
+            {
+                Console.WriteLine("文件未找到：" + filePath);
+                return new List<RoomUsage>();
+            }
+
+            var roomUsages = new List<RoomUsage>();
+
+            using var workbook = new XLWorkbook(filePath);
+            var sheet = workbook.Worksheets.First();
+
+            foreach (var row in sheet.RowsUsed().Skip(1)) // 跳过表头
+            {
+                var rowCampus = row.Cell(10).GetString();       // J列：排课校区
+                var rowTime = row.Cell(14).GetString();         // N列：上课时间（如 周一 1-2节）
+                var rowWeeks = row.Cell(15).GetString();        // O列：起止周（如 1-16周全）
+                var room = row.Cell(16).GetString();            // P列：上课地点（如 B303）
+                var courseName = row.Cell(4).GetString();       // E列：课程名称
+                var teacher = row.Cell(7).GetString();          // H列：任课教师
+                var className = row.Cell(9).GetString();        // I列：教学班级
+
+                if (string.IsNullOrEmpty(room)) continue;
+
+                // 校区匹配
+                if (rowCampus != campus) continue;
+
+                // 教室匹配
+                if (room != roomNumber) continue;
+
+                // 星期匹配
+                if (!IsWeekdayMatch(rowTime, weekday)) continue;
+
+                // 周次匹配
+                if (!IsWeekMatch(rowWeeks, week)) continue;
+
+                // 提取节次信息
+                var period = ExtractPeriodFromTime(rowTime);
+                var timeRange = GetTimeRangeForPeriod(period);
+
+                roomUsages.Add(new RoomUsage
+                {
+                    Period = period,
+                    TimeRange = timeRange,
+                    CourseName = courseName,
+                    Teacher = teacher,
+                    Class = className
+                });
+            }
+
+            // 按节次顺序排序
+            var periodOrder = new Dictionary<string, int>
+            {
+                { "1-2节", 1 }, { "3-4节", 2 }, { "5-6节", 3 },
+                { "7-8节", 4 }, { "9-10节", 5 }
+            };
+
+            return roomUsages.OrderBy(r => periodOrder.GetValueOrDefault(r.Period, 999)).ToList();
+        }
+
+        // NEW METHOD: Get available rooms for a building (for the dropdown)
+        public List<string> GetRoomsForBuilding(string building)
+        {
+            if (string.IsNullOrEmpty(building)) return new List<string>();
+
+            return list.Where(r => r.StartsWith(building))
+                      .Select(r => r.Substring(1)) // Remove building letter (A101 -> 101)
+                      .Distinct()
+                      .OrderBy(r => r)
+                      .ToList();
+        }
+
+        // Helper method to check weekday match
+        private bool IsWeekdayMatch(string rowTime, string selectedWeekday)
+        {
+            string ExtractWeekday(string text)
+            {
+                if (text.StartsWith("周") && text.Length >= 2)
+                    return text.Substring(0, 2); // 如 "周三"
+                return "";
+            }
+
+            return ExtractWeekday(rowTime) == ExtractWeekday(selectedWeekday);
+        }
+
+        // Helper method to extract period from time string
+        private string ExtractPeriodFromTime(string rowTime)
+        {
+            // Extract period range from time string like "周三 9-10节" -> "9-10节"
+            var parts = rowTime.Split(' ');
+            if (parts.Length > 1)
+            {
+                var periodPart = parts[1];
+                if (periodPart.EndsWith("节"))
+                {
+                    return periodPart;
+                }
+                else
+                {
+                    return periodPart + "节";
+                }
+            }
+            return "";
+        }
+
+        // Helper method to get time range for a period
+        private string GetTimeRangeForPeriod(string period)
+        {
+            // Normalize period format
+            period = period.Replace("节", "");
+            if (!period.Contains("-"))
+            {
+                // Handle single periods like "1" -> "1-1"
+                if (int.TryParse(period, out int num))
+                {
+                    period = $"{num}-{num}";
+                }
+            }
+            period += "节";
+
+            return PeriodTimeMap.GetValueOrDefault(period, "时间未知");
+        }
+
+        private bool IsWeekMatch(string rowWeeks, string selectedWeek)
+        {
+            if (!int.TryParse(selectedWeek.Replace("第", "").Replace("周", ""), out int weekNumber))
+                return false;
+
+            rowWeeks = rowWeeks.Replace("周", "").Replace(" ", "");
+            bool isSingle = rowWeeks.EndsWith("单");
+            bool isDouble = rowWeeks.EndsWith("双");
+            bool isAll = rowWeeks.EndsWith("全");
+
+            // 去掉结尾描述（单/双/全）
+            if (isSingle || isDouble || isAll)
+                rowWeeks = rowWeeks.Substring(0, rowWeeks.Length - 1);
+
+            var matched = false;
+
+            foreach (var part in rowWeeks.Split(','))
+            {
+                if (part.Contains('-'))
+                {
+                    var bounds = part.Split('-');
+                    if (bounds.Length == 2 &&
+                        int.TryParse(bounds[0], out int start) &&
+                        int.TryParse(bounds[1], out int end))
+                    {
+                        if (weekNumber >= start && weekNumber <= end)
+                        {
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+                else if (int.TryParse(part, out int val))
+                {
+                    if (val == weekNumber)
+                    {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!matched) return false;
+
+            if (isSingle && weekNumber % 2 == 0) return false;
+            if (isDouble && weekNumber % 2 != 0) return false;
+
+            return true;
+        }
+
+        private bool IsPeriodMatch(string rowTime, string selectedWeekday, string selectedPeriod)
+        {
+            string Normalize(string text) => text.Replace("节", "").Replace(" ", "");
+
+            // 提取"周几"和"节次范围"
+            string ExtractWeekday(string text)
+            {
+                if (text.StartsWith("周") && text.Length >= 2)
+                    return text.Substring(0, 2); // 如 "周三"
+                return "";
+            }
+
+            string ExtractRange(string text)
+            {
+                var norm = Normalize(text);
+                var idx = norm.IndexOfAny("一二三四五六日".ToCharArray());
+                if (idx >= 0 && idx + 1 < norm.Length)
+                    return norm.Substring(idx + 1); // 从节次范围开始
+                return "";
+            }
+
+            bool TryParseRange(string range, out int start, out int end)
+            {
+                start = end = 0;
+                var nums = range.Split('-');
+                if (nums.Length == 2 &&
+                    int.TryParse(nums[0], out start) &&
+                    int.TryParse(nums[1], out end)) return true;
+                return false;
+            }
+
+            string rowWeekday = ExtractWeekday(rowTime);        // 周三
+            string userWeekday = ExtractWeekday(selectedWeekday); // 周三
+
+            if (rowWeekday != userWeekday) return false;
+
+            string rowRange = ExtractRange(rowTime);             // 09-11
+            string userRange = Normalize(selectedPeriod);        // 9-10
+
+            if (TryParseRange(rowRange, out int rowStart, out int rowEnd) &&
+                TryParseRange(userRange, out int userStart, out int userEnd))
+            {
+                return userStart >= rowStart && userEnd <= rowEnd;
+            }
+
+            return false;
+        }
+    }
+
+    // NEW CLASS: Room usage data model
+    public class RoomUsage
+    {
+        public string Period { get; set; } = "";
+        public string TimeRange { get; set; } = "";
+        public string CourseName { get; set; } = "";
+        public string Teacher { get; set; } = "";
+        public string Class { get; set; } = "";
+    }
+}
+
+
+============================================================
+FILE: VacantRoomWeb.csproj
+============================================================
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+	  <AspNetCoreHostingModel>OutOfProcess</AspNetCoreHostingModel>
+	  <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Data\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Data\schedule.xlsx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ProjectExtensions><VisualStudio><UserProperties properties_4launchsettings_1json__JsonSchema="" /></VisualStudio></ProjectExtensions>
+
+</Project>
+    
+
+
+============================================================
+FILE: appsettings.Development.json
+============================================================
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+
+
+
+============================================================
+FILE: appsettings.json
+============================================================
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
+}
+
+
+
+================================================================================
+END OF CODE FILES
+================================================================================
