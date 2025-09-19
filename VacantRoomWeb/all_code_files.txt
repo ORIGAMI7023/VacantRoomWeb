@@ -204,218 +204,6 @@ FILE: Components\Pages\Error.razor
 
 
 ============================================================
-FILE: Components\Pages\VacantRoom - 副本.razor
-============================================================
-﻿@page "/"
-@rendermode InteractiveServer
-@inject VacantRoomService VacantService
-
-<h3 style="margin-bottom: 1rem;">空教室查询</h3>
-<p style="font-size: 1.1rem; color: gray;">@TodayText</p>
-
-<div style="max-width: 400px;">
-    <div style="margin-bottom: 1rem;">
-        <label style="display: inline-block; width: 80px;">校区：</label>
-        <select @bind="Campus" style="width: 200px;">
-            <option value="奉贤校区">奉贤</option>
-            <option value="徐汇校区">徐汇</option>
-        </select>
-    </div>
-
-    <div style="margin-bottom: 1rem;">
-        <label style="display: inline-block; width: 80px;">星期：</label>
-        <select @bind="Weekday" style="width: 200px;">
-            <option>周一</option>
-            <option>周二</option>
-            <option>周三</option>
-            <option>周四</option>
-            <option>周五</option>
-        </select>
-    </div>
-
-    <div style="margin-bottom: 1rem;">
-        <label style="display: inline-block; width: 80px;">节次：</label>
-        <select @bind="Period" style="width: 200px;">
-            <option>1-2节</option>
-            <option>3-4节</option>
-            <option>5-6节</option>
-            <option>7-8节</option>
-            <option>9-10节</option>
-        </select>
-    </div>
-
-    <div style="margin-bottom: 1rem;">
-        <label style="display: inline-block; width: 80px;">教学楼：</label>
-        <select @bind="Building" style="width: 200px;">
-            <option>所有</option>
-            <option>A</option>
-            <option>B</option>
-            <option>C</option>
-            <option>D</option>
-        </select>
-    </div>
-
-    <div style="margin-bottom: 1rem;">
-        <label style="display: inline-block; width: 80px;">第几周：</label>
-        <select @bind="Week" style="width: 200px;">
-            @for (int i = 1; i <= 18; i++)
-            {
-                <option value="@($"第{i}周")">第 @i 周</option>
-            }
-        </select>
-    </div>
-
-    <div style="margin-bottom: 1rem;">
-        <button @onclick="QueryVacantRooms" style="padding: 6px 12px; font-weight: bold;">
-            查询空教室
-        </button>
-    </div>
-
-    <hr />
-
-    <p style="color: red;">[Debug]当前选中： @Campus, @Weekday, @Period, @Building, @Week</p>
-
-    @if (Result != null)
-    {
-        <p style="color: orange;">[Debug]共查询到 @Result.Count 教室</p>
-        <ul>
-            @foreach (var room in Result)
-            {
-                <li>@room</li>
-            }
-        </ul>
-    }
-    else
-    {
-        <p style="color: gray;">请填写条件后点击查询</p>
-    }
-
-
-
-</div>
-<!-- ======= 备案信息页脚 BEGIN ======= -->
-<footer class="text-center text-muted small py-3" style="white-space:nowrap;">
-    ©@(DateTime.Now.Year) origami7023.cn&nbsp;|&nbsp;
-    <a href="https://beian.miit.gov.cn/" target="_blank">
-        沪ICP备2025129900号-1
-    </a>
-</footer>
-<!-- ======= 备案信息页脚 END ======= -->
-@code {
-    string Campus = "奉贤校区";
-    string Weekday = "";
-    string Period = "1-2节";
-    string Building = "所有";
-    string Week = "第1周";
-
-    List<string> Result;
-    string TodayText;
-
-    record SelectItem(string Label, Func<string> Get, Action<string> Set, List<(string Value, string Text)> Options);
-    List<SelectItem> selectors => new()
-    {
-        new("校区：",     () => Campus,   v => Campus = v, new() { ("奉贤校区", "奉贤"), ("徐汇校区", "徐汇") }),
-        new("星期：",     () => Weekday,  v => Weekday = v, new() { ("周一", "周一"), ("周二", "周二"), ("周三", "周三"), ("周四", "周四"), ("周五", "周五") }),
-        new("节次：",     () => Period,   v => Period = v, new() { ("1-2节", "1-2节"), ("3-4节", "3-4节"), ("5-6节", "5-6节"), ("7-8节", "7-8节"), ("9-10节", "9-10节") }),
-        new("教学楼：",   () => Building, v => Building = v, new() { ("所有", "所有"), ("A", "A"), ("B", "B"), ("C", "C"), ("D", "D") }),
-        new("第几周：",   () => Week,     v => Week = v, Enumerable.Range(1, 18).Select(i => ($"第{i}周", $"第 {i} 周")).ToList())
-    };
-
-
-    // —— 节次时间表（仅用于自动选择）——
-    // 规则：当前处于某一节次时，默认选中“下一段”；
-    // 若当日所有节次都结束，则默认选中“1-2节”（相当于明天的第一段）。
-    List<(TimeSpan Start, TimeSpan End, string Label)> PeriodSlots = new()
-    {
-        (new TimeSpan(8, 00, 00), new TimeSpan(9, 40, 00), "1-2节"),
-        (new TimeSpan(9, 55, 00), new TimeSpan(11, 35, 00), "3-4节"),
-        (new TimeSpan(13, 30, 00), new TimeSpan(15, 10, 00), "5-6节"),
-        (new TimeSpan(15, 25, 00), new TimeSpan(17, 05, 00), "7-8节"),
-        // 如果后续想支持 9-10 节，补一条时间段并把下拉框里“9-10节”对应起来
-        // (new TimeSpan(18, 30, 00), new TimeSpan(20, 10, 00), "9-10节"),
-    };
-
-    void SetDefaultPeriodByNow()
-    {
-        DateTime now = DateTime.Now;
-        TimeSpan t = now.TimeOfDay;
-
-        // 1) 如果当前时间在某一段内 → 选中下一段
-        for (int i = 0; i < PeriodSlots.Count; i++)
-        {
-            (TimeSpan Start, TimeSpan End, string Label) slot = PeriodSlots[i];
-
-            if (t >= slot.Start && t <= slot.End)
-            {
-                int nextIndex = i + 1;
-                if (nextIndex < PeriodSlots.Count)
-                {
-                    Period = PeriodSlots[nextIndex].Label;
-                }
-                else
-                {
-                    Period = "1-2节"; // 当日最后一段 → 选明天的第一段（这里仅设置节次，不改星期）
-                }
-                return;
-            }
-        }
-
-        // 2) 如果当前时间还没到当天第一段开始 → 选当天第一段
-        if (t < PeriodSlots[0].Start)
-        {
-            Period = PeriodSlots[0].Label;
-            return;
-        }
-
-        // 3) 如果已经晚于当日最后一段 → 选“1-2节”
-        Period = "1-2节";
-    }
-
-
-
-    void QueryVacantRooms()
-    {
-        Result = VacantService.GetVacantRooms(Campus, Weekday, Period, Building, Week);
-    }
-
-    protected override void OnInitialized()
-    {
-        // 默认星期几设置
-        var today = DateTime.Today.DayOfWeek;
-        TodayText = DateTime.Today.ToString("D");
-
-        Weekday = today switch
-        {
-            DayOfWeek.Monday => "周一",
-            DayOfWeek.Tuesday => "周二",
-            DayOfWeek.Wednesday => "周三",
-            DayOfWeek.Thursday => "周四",
-            DayOfWeek.Friday => "周五",
-            _ => "周一"
-        };
-
-        // 设置：第14周开始于 2025年5月27日（周二）
-        DateTime week14Start = new DateTime(2025, 9, 8);
-        int passedDays = (DateTime.Today - week14Start).Days;
-        int weekOffset = passedDays / 7;
-        int currentWeekNumber = 1 + weekOffset;
-
-        // 限制范围 1~18
-        if (currentWeekNumber < 1) currentWeekNumber = 1;
-        if (currentWeekNumber > 18) currentWeekNumber = 18;
-
-        // 自动选择星期
-        Week = $"第{currentWeekNumber}周";
-
-        // 默认节次设置
-        SetDefaultPeriodByNow();
-    }
-
-}
-
-
-
-============================================================
 FILE: Components\Pages\VacantRoom.razor
 ============================================================
 ﻿@page "/"
@@ -622,12 +410,7 @@ FILE: Components\Pages\VacantRoom.razor
                                         <strong>教师：</strong>@usage.Teacher
                                     </div>
                                 }
-                                @if (!string.IsNullOrEmpty(usage.Class))
-                                {
-                                    <div style="font-size: 0.9em; color: #6c757d;">
-                                        <strong>班级：</strong>@usage.Class
-                                    </div>
-                                }
+                                
                             </div>
                         }
                     </div>
@@ -702,15 +485,6 @@ FILE: Components\Pages\VacantRoom.razor
         (new TimeSpan(13, 30, 00), new TimeSpan(15, 10, 00), "5-6节"),
         (new TimeSpan(15, 25, 00), new TimeSpan(17, 05, 00), "7-8节"),
         (new TimeSpan(18, 30, 00), new TimeSpan(20, 10, 00), "9-10节"),
-    };
-
-    Dictionary<string, string> PeriodTimeMap = new()
-    {
-        { "1-2节", "08:00-09:40" },
-        { "3-4节", "09:55-11:35" },
-        { "5-6节", "13:30-15:10" },
-        { "7-8节", "15:25-17:05" },
-        { "9-10节", "18:30-20:10" }
     };
 
     void SetDefaultPeriodByNow()
@@ -1105,10 +879,17 @@ namespace VacantRoomWeb
         private readonly Dictionary<string, string> PeriodTimeMap = new()
         {
             { "1-2节", "08:00-09:40" },
+            { "01-02节", "08:00-09:40" },
             { "3-4节", "09:55-11:35" },
+            { "03-04节", "09:55-11:35" },
             { "5-6节", "13:30-15:10" },
+            { "05-06节", "13:30-15:10" },
             { "7-8节", "15:25-17:05" },
-            { "9-10节", "18:30-20:10" }
+            { "07-08节", "15:25-17:05" },
+            { "9-10节", "18:00-19:35" },
+            { "09-10节", "18:00-19:35" },
+            { "9-11节", "18:00-20:30" },
+            { "09-11节", "18:00-20:30" }
         };
 
         public List<string> GetVacantRooms(string campus, string weekday, string period, string building, string week)
@@ -1193,9 +974,8 @@ namespace VacantRoomWeb
                 var rowTime = row.Cell(14).GetString();         // N列：上课时间（如 周一 1-2节）
                 var rowWeeks = row.Cell(15).GetString();        // O列：起止周（如 1-16周全）
                 var room = row.Cell(16).GetString();            // P列：上课地点（如 B303）
-                var courseName = row.Cell(4).GetString();       // E列：课程名称
-                var teacher = row.Cell(7).GetString();          // H列：任课教师
-                var className = row.Cell(9).GetString();        // I列：教学班级
+                var courseName = row.Cell(5).GetString();       // E列：课程名称
+                var teacher = row.Cell(12).GetString();          // H列：任课教师
 
                 if (string.IsNullOrEmpty(room)) continue;
 
@@ -1221,15 +1001,19 @@ namespace VacantRoomWeb
                     TimeRange = timeRange,
                     CourseName = courseName,
                     Teacher = teacher,
-                    Class = className
                 });
             }
 
             // 按节次顺序排序
             var periodOrder = new Dictionary<string, int>
             {
-                { "1-2节", 1 }, { "3-4节", 2 }, { "5-6节", 3 },
-                { "7-8节", 4 }, { "9-10节", 5 }
+                { "1-2节", 1 }, { "01-02节", 1 },
+                { "3-4节", 2 }, { "03-04节", 2 },
+                { "5-6节", 3 }, { "05-06节", 3 },
+                { "7-8节", 4 }, { "07-08节", 4 },
+                { "9-10节", 5 }, { "09-10节", 5 },
+                { "9-11节", 6 }, { "09-11节", 6 },
+                { "10-11节", 7 }, { "10-12节", 8 }
             };
 
             return roomUsages.OrderBy(r => periodOrder.GetValueOrDefault(r.Period, 999)).ToList();
@@ -1404,7 +1188,6 @@ namespace VacantRoomWeb
         public string TimeRange { get; set; } = "";
         public string CourseName { get; set; } = "";
         public string Teacher { get; set; } = "";
-        public string Class { get; set; } = "";
     }
 }
 

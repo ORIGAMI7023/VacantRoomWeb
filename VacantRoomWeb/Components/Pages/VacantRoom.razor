@@ -284,31 +284,37 @@
         DateTime now = DateTime.Now;
         TimeSpan t = now.TimeOfDay;
 
+        // Check each time slot to see if current time falls within it
         for (int i = 0; i < PeriodSlots.Count; i++)
         {
             (TimeSpan Start, TimeSpan End, string Label) slot = PeriodSlots[i];
 
+            // If current time is within this period, select it
             if (t >= slot.Start && t <= slot.End)
             {
-                int nextIndex = i + 1;
-                if (nextIndex < PeriodSlots.Count)
-                {
-                    Period = PeriodSlots[nextIndex].Label;
-                }
-                else
-                {
-                    Period = "1-2节";
-                }
+                Period = slot.Label;  // Select current period, not next
                 return;
             }
         }
 
+        // If before first period (before 8:00), default to first period
         if (t < PeriodSlots[0].Start)
         {
-            Period = PeriodSlots[0].Label;
+            Period = PeriodSlots[0].Label; // "1-2节"
             return;
         }
 
+        // If between periods or after all periods, find the next upcoming period
+        for (int i = 0; i < PeriodSlots.Count - 1; i++)
+        {
+            if (t > PeriodSlots[i].End && t < PeriodSlots[i + 1].Start)
+            {
+                Period = PeriodSlots[i + 1].Label; // Next period
+                return;
+            }
+        }
+
+        // If after all periods (after 20:10), default to first period of next day
         Period = "1-2节";
     }
 
