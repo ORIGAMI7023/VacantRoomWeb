@@ -34,8 +34,12 @@ def combine_code_files():
     print(f"Scanning directory: {base_dir}")
     print(f"Output file: {output_file}")
     
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+    
     with open(output_file, 'w', encoding='utf-8') as outf:
         outf.write("=" * 80 + "\n")
+        outf.write(f"打包时间: {current_time}\n")
         outf.write("VACANTROOM WEB PROJECT - ALL CODE FILES\n")
         outf.write("=" * 80 + "\n\n")
         
