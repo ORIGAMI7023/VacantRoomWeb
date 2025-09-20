@@ -8,6 +8,7 @@ FILE: AdminAuthService.cs
 ============================================================
 ﻿using System.Security.Cryptography;
 using System.Text;
+using Microsoft.JSInterop;
 
 namespace VacantRoomWeb
 {
@@ -59,24 +60,53 @@ namespace VacantRoomWeb
             return isValid;
         }
 
-        public void SetAuthCookie(string username)
+        public async Task SetAuthCookieAsync(string username, IJSRuntime jsRuntime)
         {
             var context = _httpContextAccessor.HttpContext;
             if (context == null) return;
 
             var cookieValue = CreateAuthToken(username);
-            var options = new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = context.Request.IsHttps,
-                SameSite = SameSiteMode.Strict,
-                Expires = DateTime.UtcNow.AddDays(7) // 7 days expiration
-            };
+            var expires = DateTime.UtcNow.AddDays(7);
 
-            context.Response.Cookies.Append("AdminAuth", cookieValue, options);
+            // 使用 JavaScript 设置 Cookie
+            var secure = context.Request.IsHttps ? "secure; " : "";
+            var cookieString = $"AdminAuth={cookieValue}; expires={expires:R}; path=/; {secure}samesite=strict";
+
+            await jsRuntime.InvokeVoidAsync("eval", $"document.cookie = '{cookieString}'");
 
             var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
             _logger.LogAccess(ip, "ADMIN_AUTH_COOKIE_SET", username);
+        }
+
+        public void SetAuthCookie(string username)
+        {
+            var context = _httpContextAccessor.HttpContext;
+            if (context == null) return;
+
+            try
+            {
+                var cookieValue = CreateAuthToken(username);
+                var options = new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = context.Request.IsHttps,
+                    SameSite = SameSiteMode.Strict,
+                    Expires = DateTime.UtcNow.AddDays(7)
+                };
+
+                context.Response.Cookies.Append("AdminAuth", cookieValue, options);
+
+                var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
+                _logger.LogAccess(ip, "ADMIN_AUTH_COOKIE_SET", username);
+            }
+            catch (InvalidOperationException)
+            {
+                // Response has already started, can't set cookie through HttpContext
+                // This will be handled by the caller using JavaScript
+                var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
+                _logger.LogAccess(ip, "ADMIN_AUTH_COOKIE_SET_FAILED", "Response already started");
+                throw;
+            }
         }
 
         public bool IsAuthenticated()
@@ -332,13 +362,13 @@ FILE: Components\Pages\AdminDashboard.razor
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 
-<PageTitle>Admin Dashboard</PageTitle>
+<PageTitle>管理后台</PageTitle>
 
 @if (!IsAuthenticated)
 {
     <div class="loading-container">
         <div class="spinner-border" role="status">
-            <span class="visually-hidden">Loading...</span>
+            <span class="visually-hidden">加载中...</span>
         </div>
     </div>
 }
@@ -346,20 +376,20 @@ else
 {
     <div class="admin-dashboard">
         <div class="dashboard-header">
-            <h1>Admin Dashboard</h1>
+            <h1>管理后台</h1>
             <div class="header-actions">
-                <span class="user-info">Welcome, Admin</span>
-                <button @onclick="HandleLogout" class="btn btn-outline-secondary btn-sm">Logout</button>
+                <span class="user-info">欢迎，管理员</span>
+                <button @onclick="HandleLogout" class="btn btn-outline-secondary btn-sm">退出登录</button>
             </div>
         </div>
 
-        <!-- Stats Overview -->
+        <!-- 统计概览 -->
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-icon">👥</div>
                 <div class="stat-content">
                     <h3>@CurrentConnections</h3>
-                    <p>Active Connections</p>
+                    <p>活跃连接数</p>
                 </div>
             </div>
 
@@ -367,7 +397,7 @@ else
                 <div class="stat-icon">🛡️</div>
                 <div class="stat-content">
                     <h3>@SecurityStats["TotalBannedIPs"]</h3>
-                    <p>Banned IPs</p>
+                    <p>已封禁IP</p>
                 </div>
             </div>
 
@@ -375,7 +405,7 @@ else
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
                     <h3>@SecurityStats["RecentBreachAttempts"]</h3>
-                    <p>Recent Attacks (24h)</p>
+                    <p>近期攻击次数(24小时)</p>
                 </div>
             </div>
 
@@ -383,52 +413,52 @@ else
                 <div class="stat-icon">📊</div>
                 <div class="stat-content">
                     <h3>@RecentLogs.Count</h3>
-                    <p>Recent Log Entries</p>
+                    <p>最近日志条目</p>
                 </div>
             </div>
         </div>
 
-        <!-- System Status -->
+        <!-- 系统状态 -->
         @if ((bool)SecurityStats["AdminPanelLocked"])
         {
             <div class="alert alert-warning">
-                <strong>⚠️ System Alert:</strong> Admin panel is currently under lockdown until @SecurityStats["LockdownUntil"]
+                <strong>⚠️ 系统警告：</strong> 管理面板目前处于锁定状态，解锁时间：@SecurityStats["LockdownUntil"]
             </div>
         }
 
-        <!-- Tab Navigation -->
+        <!-- 标签页导航 -->
         <div class="tab-navigation">
             <button @onclick="() => SetActiveTab(0)" class="tab-btn @(ActiveTab == 0 ? "active" : "")">
-                📊 Access Logs
+                📊 访问日志
             </button>
             <button @onclick="() => SetActiveTab(1)" class="tab-btn @(ActiveTab == 1 ? "active" : "")">
-                🛡️ Security Events
+                🛡️ 安全事件
             </button>
             <button @onclick="() => SetActiveTab(2)" class="tab-btn @(ActiveTab == 2 ? "active" : "")">
-                ⚙️ System Info
+                ⚙️ 系统信息
             </button>
         </div>
 
-        <!-- Tab Content -->
+        <!-- 标签页内容 -->
         <div class="tab-content">
             @if (ActiveTab == 0)
             {
-                <!-- Access Logs Tab -->
+                <!-- 访问日志标签页 -->
                 <div class="logs-section">
                     <div class="section-header">
-                        <h3>Recent Access Logs</h3>
-                        <button @onclick="RefreshLogs" class="btn btn-primary btn-sm">🔄 Refresh</button>
+                        <h3>最近访问日志</h3>
+                        <button @onclick="RefreshLogs" class="btn btn-primary btn-sm">🔄 刷新</button>
                     </div>
 
                     <div class="logs-table-container">
                         <table class="logs-table">
                             <thead>
                                 <tr>
-                                    <th>Time</th>
-                                    <th>IP Address</th>
-                                    <th>Action</th>
-                                    <th>Details</th>
-                                    <th>User Agent</th>
+                                    <th class="time-header">时间</th>
+                                    <th class="ip-header">IP地址</th>
+                                    <th class="action-header">操作类型</th>
+                                    <th class="details-header">详细信息</th>
+                                    <th class="ua-header">用户代理</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -436,9 +466,9 @@ else
                                 {
                                     <tr class="@GetLogRowClass(log.Action)">
                                         <td class="time-cell">@log.Timestamp.ToString("MM-dd HH:mm:ss")</td>
-                                        <td class="ip-cell">@log.IP</td>
-                                        <td class="action-cell">@log.Action</td>
-                                        <td class="details-cell">@log.Details</td>
+                                        <td class="ip-cell" title="点击复制IP地址">@log.IP</td>
+                                        <td class="action-cell" title="@log.Action">@FormatActionType(log.Action)</td>
+                                        <td class="details-cell" title="@log.Details">@log.Details</td>
                                         <td class="ua-cell" title="@log.UserAgent">@TruncateUserAgent(log.UserAgent)</td>
                                     </tr>
                                 }
@@ -449,11 +479,11 @@ else
             }
             else if (ActiveTab == 1)
             {
-                <!-- Security Events Tab -->
+                <!-- 安全事件标签页 -->
                 <div class="security-section">
                     <div class="section-header">
-                        <h3>Security Events</h3>
-                        <button @onclick="RefreshSecurity" class="btn btn-primary btn-sm">🔄 Refresh</button>
+                        <h3>安全事件</h3>
+                        <button @onclick="RefreshSecurity" class="btn btn-primary btn-sm">🔄 刷新</button>
                     </div>
 
                     <div class="security-events">
@@ -465,8 +495,8 @@ else
                                     <span class="event-time">@secEvent.Timestamp.ToString("MM-dd HH:mm:ss")</span>
                                 </div>
                                 <div class="event-details">
-                                    <strong>IP:</strong> @secEvent.IP<br />
-                                    <strong>Details:</strong> @secEvent.Details
+                                    <strong>IP地址：</strong> @secEvent.IP<br />
+                                    <strong>详细信息：</strong> @secEvent.Details
                                 </div>
                             </div>
                         }
@@ -475,23 +505,23 @@ else
             }
             else if (ActiveTab == 2)
             {
-                <!-- System Info Tab -->
+                <!-- 系统信息标签页 -->
                 <div class="system-section">
-                    <h3>System Information</h3>
+                    <h3>系统信息</h3>
 
                     <div class="info-grid">
                         <div class="info-card">
-                            <h4>Server Status</h4>
-                            <p><strong>Uptime:</strong> @GetUptime()</p>
-                            <p><strong>Environment:</strong> @Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")</p>
-                            <p><strong>Server Time:</strong> @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</p>
+                            <h4>服务器状态</h4>
+                            <p><strong>运行时间：</strong> @GetUptime()</p>
+                            <p><strong>运行环境：</strong> @Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")</p>
+                            <p><strong>服务器时间：</strong> @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</p>
                         </div>
 
                         <div class="info-card">
-                            <h4>Security Status</h4>
-                            <p><strong>Active IP Tracking:</strong> @SecurityStats["ActiveIPTracking"]</p>
-                            <p><strong>Panel Locked:</strong> @((bool)SecurityStats["AdminPanelLocked"] ? "Yes" : "No")</p>
-                            <p><strong>Available Log Dates:</strong> @AvailableLogDates.Count</p>
+                            <h4>安全状态</h4>
+                            <p><strong>活跃IP跟踪：</strong> @SecurityStats["ActiveIPTracking"]</p>
+                            <p><strong>面板锁定：</strong> @((bool)SecurityStats["AdminPanelLocked"] ? "是" : "否")</p>
+                            <p><strong>可用日志日期：</strong> @AvailableLogDates.Count 个</p>
                         </div>
                     </div>
                 </div>
@@ -500,260 +530,6 @@ else
     </div>
 }
 
-<style>
-    .loading-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-    }
-
-    .admin-dashboard {
-        padding: 20px;
-        max-width: 1200px;
-        margin: 0 auto;
-    }
-
-    .dashboard-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 30px;
-        padding-bottom: 20px;
-        border-bottom: 2px solid #e1e5e9;
-    }
-
-        .dashboard-header h1 {
-            color: #333;
-            margin: 0;
-        }
-
-    .header-actions {
-        display: flex;
-        align-items: center;
-        gap: 15px;
-    }
-
-    .user-info {
-        color: #666;
-        font-weight: 500;
-    }
-
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 20px;
-        margin-bottom: 30px;
-    }
-
-    .stat-card {
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        display: flex;
-        align-items: center;
-        gap: 15px;
-    }
-
-    .stat-icon {
-        font-size: 2rem;
-    }
-
-    .stat-content h3 {
-        margin: 0;
-        font-size: 1.8rem;
-        color: #333;
-    }
-
-    .stat-content p {
-        margin: 5px 0 0 0;
-        color: #666;
-        font-size: 0.9rem;
-    }
-
-    .tab-navigation {
-        display: flex;
-        gap: 5px;
-        margin-bottom: 20px;
-        border-bottom: 2px solid #e1e5e9;
-    }
-
-    .tab-btn {
-        padding: 12px 20px;
-        border: none;
-        background: none;
-        cursor: pointer;
-        border-radius: 5px 5px 0 0;
-        font-weight: 500;
-        transition: all 0.3s;
-    }
-
-        .tab-btn.active {
-            background: #667eea;
-            color: white;
-        }
-
-        .tab-btn:not(.active):hover {
-            background: #f8f9fa;
-        }
-
-    .tab-content {
-        background: white;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        padding: 20px;
-    }
-
-    .section-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-    }
-
-    .logs-table-container {
-        overflow-x: auto;
-        max-height: 600px;
-        overflow-y: auto;
-    }
-
-    .logs-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.9rem;
-    }
-
-        .logs-table th,
-        .logs-table td {
-            padding: 8px 12px;
-            text-align: left;
-            border-bottom: 1px solid #e1e5e9;
-        }
-
-        .logs-table th {
-            background: #f8f9fa;
-            font-weight: 600;
-            position: sticky;
-            top: 0;
-        }
-
-        .logs-table .time-cell {
-            width: 120px;
-        }
-
-        .logs-table .ip-cell {
-            width: 120px;
-        }
-
-        .logs-table .action-cell {
-            width: 150px;
-        }
-
-        .logs-table .details-cell {
-            width: 200px;
-        }
-
-        .logs-table .ua-cell {
-            width: 150px;
-        }
-
-    .security-row {
-        background-color: #fff3cd;
-    }
-
-    .error-row {
-        background-color: #f8d7da;
-    }
-
-    .access-row {
-        background-color: #d1ecf1;
-    }
-
-    .security-events {
-        max-height: 600px;
-        overflow-y: auto;
-    }
-
-    .security-event {
-        margin-bottom: 15px;
-        padding: 15px;
-        border-radius: 5px;
-        border-left: 4px solid #dc3545;
-    }
-
-        .security-event.warning {
-            background-color: #fff3cd;
-            border-left-color: #ffc107;
-        }
-
-        .security-event.danger {
-            background-color: #f8d7da;
-            border-left-color: #dc3545;
-        }
-
-    .event-header {
-        display: flex;
-        justify-content: space-between;
-        font-weight: 600;
-        margin-bottom: 8px;
-    }
-
-    .info-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 20px;
-    }
-
-    .info-card {
-        background: #f8f9fa;
-        padding: 20px;
-        border-radius: 8px;
-    }
-
-        .info-card h4 {
-            margin-top: 0;
-            color: #333;
-        }
-
-    .alert {
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-    }
-
-    .alert-warning {
-        background-color: #fff3cd;
-        border: 1px solid #ffeaa7;
-        color: #856404;
-    }
-
-    .btn {
-        padding: 8px 16px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 500;
-        text-decoration: none;
-        display: inline-block;
-    }
-
-    .btn-primary {
-        background: #667eea;
-        color: white;
-    }
-
-    .btn-outline-secondary {
-        background: transparent;
-        color: #6c757d;
-        border: 1px solid #6c757d;
-    }
-
-    .btn-sm {
-        padding: 5px 10px;
-        font-size: 0.875rem;
-    }
-</style>
 
 @code {
     private bool IsAuthenticated = false;
@@ -846,300 +622,208 @@ else
 FILE: Components\Pages\AdminLogin.razor
 ============================================================
 ﻿@page "/admin/login"
+@rendermode InteractiveServer
 @inject AdminAuthService AuthService
 @inject SecurityService SecurityService
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 
-<PageTitle>Admin Login</PageTitle>
+<PageTitle>Admin Login - Debug</PageTitle>
 
-<div class="admin-login-container">
-    <div class="login-card">
-        <div class="login-header">
-            <h2>Admin Panel Login</h2>
-            <p>VacantRoomWeb Management</p>
-        </div>
+<div style="max-width: 400px; margin: 50px auto; padding: 20px; border: 1px solid #ccc;">
+    <h2>Admin Login - Debug Mode</h2>
 
-        @if (IsLocked)
-        {
-            <div class="alert alert-danger">
-                <strong>System Locked</strong><br />
-                Admin panel is temporarily unavailable due to security measures.
-                Please try again later.
-            </div>
-        }
-        else
-        {
-            <EditForm Model="@loginModel" OnValidSubmit="@HandleLogin" FormName="AdminLogin">
-                <DataAnnotationsValidator />
+    <p>当前时间: @DateTime.Now.ToString("HH:mm:ss")</p>
+    <p>计数器: @counter</p>
 
-                @if (!string.IsNullOrEmpty(ErrorMessage))
-                {
-                    <div class="alert alert-danger">
-                        @ErrorMessage
-                    </div>
-                }
+    <button @onclick="IncrementCounter" style="padding: 10px; margin: 5px; background: #007bff; color: white; border: none;">
+        点击测试 (@counter)
+    </button>
 
-                <div class="form-group">
-                    <label for="username">Username:</label>
-                    <InputText id="username" @bind-Value="loginModel.Username" class="form-control" placeholder="Enter username" />
-                    <ValidationMessage For="@(() => loginModel.Username)" />
-                </div>
+    <hr />
 
-                <div class="form-group">
-                    <label for="password">Password:</label>
-                    <InputText id="password" @bind-Value="loginModel.Password" type="password" class="form-control" placeholder="Enter password" />
-                    <ValidationMessage For="@(() => loginModel.Password)" />
-                </div>
-
-                <div class="form-group">
-                    <button type="submit" class="btn btn-primary btn-block" disabled="@IsLoading">
-                        @if (IsLoading)
-                        {
-                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                            <text> Logging in...</text>
-                        }
-                        else
-                        {
-                            <text>Login</text>
-                        }
-                    </button>
-                </div>
-            </EditForm>
-        }
-
-        <div class="login-footer">
-            <small class="text-muted">
-                Authorized access only. All activities are logged.
-            </small>
-        </div>
+    <div style="margin-bottom: 15px;">
+        <label>Username:</label><br />
+        <input @bind="Username" @oninput="OnUsernameInput" type="text" style="width: 100%; padding: 8px;" />
+        <small>输入的值: @Username</small>
     </div>
+
+    <div style="margin-bottom: 15px;">
+        <label>Password:</label><br />
+        <input @bind="Password" @oninput="OnPasswordInput" type="password" style="width: 100%; padding: 8px;" />
+        <small>密码长度: @(Password?.Length ?? 0)</small>
+    </div>
+
+    <button @onclick="SimpleTest" style="width: 100%; padding: 10px; background: #28a745; color: white; border: none; margin: 5px 0;">
+        测试配置
+    </button>
+
+    <button @onclick="LoginTest" style="width: 100%; padding: 10px; background: #dc3545; color: white; border: none; margin: 5px 0;">
+        登录
+    </button>
+
+    @if (!string.IsNullOrEmpty(Message))
+    {
+        <div style="padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; margin-top: 15px; max-height: 300px; overflow-y: auto;">
+            <pre style="white-space: pre-wrap; font-size: 12px; margin: 0;">@Message</pre>
+        </div>
+    }
 </div>
 
-<style>
-    .admin-login-container {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 20px;
-    }
-
-    .login-card {
-        background: white;
-        border-radius: 10px;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-        padding: 40px;
-        width: 100%;
-        max-width: 400px;
-    }
-
-    .login-header {
-        text-align: center;
-        margin-bottom: 30px;
-    }
-
-        .login-header h2 {
-            color: #333;
-            margin-bottom: 5px;
-            font-weight: 600;
-        }
-
-        .login-header p {
-            color: #666;
-            margin: 0;
-        }
-
-    .form-group {
-        margin-bottom: 20px;
-    }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #555;
-            font-weight: 500;
-        }
-
-    .form-control {
-        width: 100%;
-        padding: 12px;
-        border: 2px solid #e1e5e9;
-        border-radius: 5px;
-        font-size: 14px;
-        transition: border-color 0.3s;
-    }
-
-        .form-control:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-    .btn {
-        width: 100%;
-        padding: 12px;
-        border: none;
-        border-radius: 5px;
-        font-size: 16px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s;
-    }
-
-    .btn-primary {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-
-        .btn-primary:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-
-    .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    .alert {
-        padding: 12px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-    }
-
-    .alert-danger {
-        background-color: #f8d7da;
-        border: 1px solid #f5c6cb;
-        color: #721c24;
-    }
-
-    .login-footer {
-        text-align: center;
-        margin-top: 30px;
-        padding-top: 20px;
-        border-top: 1px solid #e1e5e9;
-    }
-
-    .spinner-border {
-        width: 1rem;
-        height: 1rem;
-    }
-
-    .validation-message {
-        color: #dc3545;
-        font-size: 12px;
-        margin-top: 5px;
-    }
-</style>
-
 @code {
-    private LoginModel loginModel = new();
-    private string ErrorMessage = "";
-    private bool IsLoading = false;
-    private bool IsLocked = false;
+    private int counter = 0;
+    private string Username = "";
+    private string Password = "";
+    private string Message = "页面已加载，等待测试...";
 
-    public class LoginModel
+    protected override async Task OnInitializedAsync()
     {
-        [Required(ErrorMessage = "Username is required")]
-        public string Username { get; set; } = "";
+        Message = $"页面初始化完成: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
 
-        [Required(ErrorMessage = "Password is required")]
-        public string Password { get; set; } = "";
-    }
-
-    protected override void OnInitialized()
-    {
         // Check if admin panel is locked
-        IsLocked = SecurityService.IsAdminPanelLocked();
+        if (SecurityService.IsAdminPanelLocked())
+        {
+            Message += "\n⚠️ 管理面板已锁定";
+            return;
+        }
 
         // If already authenticated, redirect to dashboard
         if (AuthService.IsAuthenticated())
         {
-            Navigation.NavigateTo("/admin");
+            Message += "\n✅ 已认证，准备跳转...";
+            await Task.Delay(100); // 短暂延迟确保组件完全加载
+            Navigation.NavigateTo("/admin", true);
         }
     }
 
-    private async Task HandleLogin()
+    private void IncrementCounter()
     {
-        if (IsLocked)
-        {
-            ErrorMessage = "Admin panel is currently locked due to security measures.";
-            return;
-        }
-
-        IsLoading = true;
-        ErrorMessage = "";
+        counter++;
+        Message += $"\n计数器点击: {counter} - {DateTime.Now:HH:mm:ss}";
         StateHasChanged();
+    }
+
+    private void OnUsernameInput(ChangeEventArgs e)
+    {
+        Username = e.Value?.ToString() ?? "";
+        Message += $"\n用户名输入: '{Username}'";
+        StateHasChanged();
+    }
+
+    private void OnPasswordInput(ChangeEventArgs e)
+    {
+        Password = e.Value?.ToString() ?? "";
+        Message += $"\n密码输入长度: {Password.Length}";
+        StateHasChanged();
+    }
+
+    private void SimpleTest()
+    {
+        Message += $"\n=== 配置测试开始 ===";
+        Message += $"\n时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
 
         try
         {
-            await Task.Delay(500); // Brief delay for UX
-
-            // 添加详细的调试信息
-            var debugInfo = $"尝试登录 - 用户名: {loginModel.Username}, 密码长度: {loginModel.Password?.Length ?? 0}";
-            Console.WriteLine(debugInfo);
-
-            // 检查配置是否存在
+            Message += $"\n正在获取 AdminConfig...";
             var adminConfig = AuthService.GetAdminConfig();
+
             if (adminConfig == null)
             {
-                ErrorMessage = "系统配置错误：管理员配置未找到。请检查 appsettings.json 中的 AdminConfig 配置。";
-                Console.WriteLine("AdminConfig 配置未找到");
-                return;
-            }
-
-            Console.WriteLine($"配置的用户名: {adminConfig.Username}");
-            Console.WriteLine($"密码哈希长度: {adminConfig.PasswordHash?.Length ?? 0}");
-            Console.WriteLine($"盐值长度: {adminConfig.Salt?.Length ?? 0}");
-
-            // 验证用户名
-            if (string.IsNullOrEmpty(loginModel.Username))
-            {
-                ErrorMessage = "请输入用户名";
-                return;
-            }
-
-            if (string.IsNullOrEmpty(loginModel.Password))
-            {
-                ErrorMessage = "请输入密码";
-                return;
-            }
-
-            if (loginModel.Username != adminConfig.Username)
-            {
-                ErrorMessage = $"用户名错误。输入: '{loginModel.Username}', 期望: '{adminConfig.Username}'";
-                return;
-            }
-
-            // 验证密码
-            var isPasswordValid = AuthService.ValidatePassword(loginModel.Password, adminConfig.PasswordHash, adminConfig.Salt);
-            Console.WriteLine($"密码验证结果: {isPasswordValid}");
-
-            if (AuthService.ValidateCredentials(loginModel.Username, loginModel.Password))
-            {
-                AuthService.SetAuthCookie(loginModel.Username);
-                Console.WriteLine("登录成功，跳转到管理后台");
-                await JSRuntime.InvokeVoidAsync("location.replace", "/admin");
+                Message += $"\n❌ AdminConfig 为 null";
+                Message += $"\n检查 appsettings.json 是否包含 AdminConfig 节点";
             }
             else
             {
-                ErrorMessage = "密码错误。请检查密码是否正确。";
-                // 不清空用户名，只清空密码
-                loginModel.Password = "";
+                Message += $"\n✅ AdminConfig 已加载";
+                Message += $"\nUsername: '{adminConfig.Username}'";
+                Message += $"\nPasswordHash 长度: {adminConfig.PasswordHash?.Length ?? 0}";
+                Message += $"\nSalt 长度: {adminConfig.Salt?.Length ?? 0}";
+
+                if (!string.IsNullOrEmpty(adminConfig.PasswordHash) && !string.IsNullOrEmpty(adminConfig.Salt))
+                {
+                    Message += $"\n正在测试密码验证...";
+                    var testResult = AuthService.ValidatePassword("K9mP#3xR8qW$7nZ5", adminConfig.PasswordHash, adminConfig.Salt);
+                    Message += $"\n测试密码验证: {(testResult ? "✅ 成功" : "❌ 失败")}";
+                }
+                else
+                {
+                    Message += $"\n❌ 密码哈希或盐值为空";
+                }
+            }
+
+            Message += $"\n测试完成: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+        }
+        catch (Exception ex)
+        {
+            Message += $"\n❌ 测试异常: {ex.Message}";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task LoginTest()
+    {
+        if (SecurityService.IsAdminPanelLocked())
+        {
+            Message += $"\n❌ 管理面板已锁定";
+            StateHasChanged();
+            return;
+        }
+
+        Message += $"\n=== 登录测试开始 ===";
+        Message += $"\n登录开始: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+        Message += $"\n输入用户名: '{Username}'";
+        Message += $"\n输入密码长度: {Password?.Length ?? 0}";
+
+        try
+        {
+            if (string.IsNullOrEmpty(Username) || string.IsNullOrEmpty(Password))
+            {
+                Message += $"\n❌ 用户名或密码为空";
+                StateHasChanged();
+                return;
+            }
+
+            var result = AuthService.ValidateCredentials(Username, Password);
+            Message += $"\n验证结果: {(result ? "✅ 成功" : "❌ 失败")}";
+
+            if (result)
+            {
+                Message += $"\n设置认证 Cookie...";
+
+                // 尝试使用 JavaScript 设置 Cookie
+                try
+                {
+                    await AuthService.SetAuthCookieAsync(Username, JSRuntime);
+                    Message += $"\n✅ Cookie 设置成功";
+                }
+                catch (Exception cookieEx)
+                {
+                    Message += $"\n❌ Cookie 设置失败: {cookieEx.Message}";
+                    StateHasChanged();
+                    return;
+                }
+
+                Message += $"\n准备跳转到 /admin";
+                StateHasChanged();
+
+                await Task.Delay(1000); // 让用户看到成功信息
+
+                Navigation.NavigateTo("/admin", forceLoad: true);
+            }
+            else
+            {
+                Message += $"\n登录失败，清空密码";
+                Password = "";
             }
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"登录过程中发生错误: {ex.Message}";
-            Console.WriteLine($"登录异常: {ex}");
+            Message += $"\n❌ 登录异常: {ex.Message}";
         }
-        finally
-        {
-            IsLoading = false;
-            StateHasChanged();
-        }
+
+        Message += $"\n=== 登录测试结束 ===";
+        StateHasChanged();
     }
 }
 
@@ -1979,6 +1663,12 @@ var builder = WebApplication.CreateBuilder(args);
 // Add Blazor services
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = null;
+    options.EnableDetailedErrors = true; // ¿ª·¢»·¾³ÆôÓÃÏêÏ¸´íÎó
+});
 
 // Register existing services
 builder.Services.AddSingleton<ConnectionCounterService>();
