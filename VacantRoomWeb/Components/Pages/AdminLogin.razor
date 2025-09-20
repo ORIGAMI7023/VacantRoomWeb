@@ -1,0 +1,205 @@
+﻿@page "/admin/login"
+@rendermode InteractiveServer
+@inject AdminAuthService AuthService
+@inject SecurityService SecurityService
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Admin Login - Debug</PageTitle>
+
+<div style="max-width: 400px; margin: 50px auto; padding: 20px; border: 1px solid #ccc;">
+    <h2>Admin Login - Debug Mode</h2>
+
+    <p>当前时间: @DateTime.Now.ToString("HH:mm:ss")</p>
+    <p>计数器: @counter</p>
+
+    <button @onclick="IncrementCounter" style="padding: 10px; margin: 5px; background: #007bff; color: white; border: none;">
+        点击测试 (@counter)
+    </button>
+
+    <hr />
+
+    <div style="margin-bottom: 15px;">
+        <label>Username:</label><br />
+        <input @bind="Username" @oninput="OnUsernameInput" type="text" style="width: 100%; padding: 8px;" />
+        <small>输入的值: @Username</small>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+        <label>Password:</label><br />
+        <input @bind="Password" @oninput="OnPasswordInput" type="password" style="width: 100%; padding: 8px;" />
+        <small>密码长度: @(Password?.Length ?? 0)</small>
+    </div>
+
+    <button @onclick="SimpleTest" style="width: 100%; padding: 10px; background: #28a745; color: white; border: none; margin: 5px 0;">
+        测试配置
+    </button>
+
+    <button @onclick="LoginTest" style="width: 100%; padding: 10px; background: #dc3545; color: white; border: none; margin: 5px 0;">
+        登录
+    </button>
+
+    @if (!string.IsNullOrEmpty(Message))
+    {
+        <div style="padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; margin-top: 15px; max-height: 300px; overflow-y: auto;">
+            <pre style="white-space: pre-wrap; font-size: 12px; margin: 0;">@Message</pre>
+        </div>
+    }
+</div>
+
+@code {
+    private int counter = 0;
+    private string Username = "";
+    private string Password = "";
+    private string Message = "页面已加载，等待测试...";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Message = $"页面初始化完成: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+
+        // Check if admin panel is locked
+        if (SecurityService.IsAdminPanelLocked())
+        {
+            Message += "\n⚠️ 管理面板已锁定";
+            return;
+        }
+
+        // If already authenticated, redirect to dashboard
+        if (AuthService.IsAuthenticated())
+        {
+            Message += "\n✅ 已认证，准备跳转...";
+            await Task.Delay(100); // 短暂延迟确保组件完全加载
+            Navigation.NavigateTo("/admin", true);
+        }
+    }
+
+    private void IncrementCounter()
+    {
+        counter++;
+        Message += $"\n计数器点击: {counter} - {DateTime.Now:HH:mm:ss}";
+        StateHasChanged();
+    }
+
+    private void OnUsernameInput(ChangeEventArgs e)
+    {
+        Username = e.Value?.ToString() ?? "";
+        Message += $"\n用户名输入: '{Username}'";
+        StateHasChanged();
+    }
+
+    private void OnPasswordInput(ChangeEventArgs e)
+    {
+        Password = e.Value?.ToString() ?? "";
+        Message += $"\n密码输入长度: {Password.Length}";
+        StateHasChanged();
+    }
+
+    private void SimpleTest()
+    {
+        Message += $"\n=== 配置测试开始 ===";
+        Message += $"\n时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+
+        try
+        {
+            Message += $"\n正在获取 AdminConfig...";
+            var adminConfig = AuthService.GetAdminConfig();
+
+            if (adminConfig == null)
+            {
+                Message += $"\n❌ AdminConfig 为 null";
+                Message += $"\n检查 appsettings.json 是否包含 AdminConfig 节点";
+            }
+            else
+            {
+                Message += $"\n✅ AdminConfig 已加载";
+                Message += $"\nUsername: '{adminConfig.Username}'";
+                Message += $"\nPasswordHash 长度: {adminConfig.PasswordHash?.Length ?? 0}";
+                Message += $"\nSalt 长度: {adminConfig.Salt?.Length ?? 0}";
+
+                if (!string.IsNullOrEmpty(adminConfig.PasswordHash) && !string.IsNullOrEmpty(adminConfig.Salt))
+                {
+                    Message += $"\n正在测试密码验证...";
+                    var testResult = AuthService.ValidatePassword("K9mP#3xR8qW$7nZ5", adminConfig.PasswordHash, adminConfig.Salt);
+                    Message += $"\n测试密码验证: {(testResult ? "✅ 成功" : "❌ 失败")}";
+                }
+                else
+                {
+                    Message += $"\n❌ 密码哈希或盐值为空";
+                }
+            }
+
+            Message += $"\n测试完成: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+        }
+        catch (Exception ex)
+        {
+            Message += $"\n❌ 测试异常: {ex.Message}";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task LoginTest()
+    {
+        if (SecurityService.IsAdminPanelLocked())
+        {
+            Message += $"\n❌ 管理面板已锁定";
+            StateHasChanged();
+            return;
+        }
+
+        Message += $"\n=== 登录测试开始 ===";
+        Message += $"\n登录开始: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+        Message += $"\n输入用户名: '{Username}'";
+        Message += $"\n输入密码长度: {Password?.Length ?? 0}";
+
+        try
+        {
+            if (string.IsNullOrEmpty(Username) || string.IsNullOrEmpty(Password))
+            {
+                Message += $"\n❌ 用户名或密码为空";
+                StateHasChanged();
+                return;
+            }
+
+            var result = AuthService.ValidateCredentials(Username, Password);
+            Message += $"\n验证结果: {(result ? "✅ 成功" : "❌ 失败")}";
+
+            if (result)
+            {
+                Message += $"\n设置认证 Cookie...";
+
+                // 尝试使用 JavaScript 设置 Cookie
+                try
+                {
+                    await AuthService.SetAuthCookieAsync(Username, JSRuntime);
+                    Message += $"\n✅ Cookie 设置成功";
+                }
+                catch (Exception cookieEx)
+                {
+                    Message += $"\n❌ Cookie 设置失败: {cookieEx.Message}";
+                    StateHasChanged();
+                    return;
+                }
+
+                Message += $"\n准备跳转到 /admin";
+                StateHasChanged();
+
+                await Task.Delay(1000); // 让用户看到成功信息
+
+                Navigation.NavigateTo("/admin", forceLoad: true);
+            }
+            else
+            {
+                Message += $"\n登录失败，清空密码";
+                Password = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            Message += $"\n❌ 登录异常: {ex.Message}";
+        }
+
+        Message += $"\n=== 登录测试结束 ===";
+        StateHasChanged();
+    }
+}

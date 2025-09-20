@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36121.58
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VacantRoomWeb", "VacantRoomWeb\VacantRoomWeb.csproj", "{F6F88C45-0310-4D0D-A6E9-571432A588ED}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GenerateAdminPassword", "GenerateAdminPassword\GenerateAdminPassword.csproj", "{F4F2E2B6-AB24-4DC5-B56F-D09C31E1069B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{F6F88C45-0310-4D0D-A6E9-571432A588ED}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F6F88C45-0310-4D0D-A6E9-571432A588ED}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F6F88C45-0310-4D0D-A6E9-571432A588ED}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F4F2E2B6-AB24-4DC5-B56F-D09C31E1069B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F4F2E2B6-AB24-4DC5-B56F-D09C31E1069B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F4F2E2B6-AB24-4DC5-B56F-D09C31E1069B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F4F2E2B6-AB24-4DC5-B56F-D09C31E1069B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

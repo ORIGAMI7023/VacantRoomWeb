@@ -3,46 +3,50 @@ using VacantRoomWeb;
 using VacantRoomWeb.Components;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddSingleton<VacantRoomService>();
 
+// Add Blazor services
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-//用于处理连接数统计的服务
-builder.Services.AddSingleton<ConnectionCounterService>(); 
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = null;
+    options.EnableDetailedErrors = true; // 开发环境启用详细错误
+});
+
+// Register existing services
+builder.Services.AddSingleton<ConnectionCounterService>();
 builder.Services.AddSingleton<ClientConnectionTracker>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
+// Register new security and logging services
+builder.Services.AddSingleton<EnhancedLoggingService>();
+builder.Services.AddSingleton<IEmailService, EmailService>();
+builder.Services.AddSingleton<SecurityService>();
+builder.Services.AddSingleton<AdminAuthService>();
+
+// Register updated services with new dependencies
+builder.Services.AddSingleton<VacantRoomService>();
 builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
-
-//使用IIS管理，不用Kestrel直接监听端口
-//builder.WebHost.ConfigureKestrel(options =>
-//{
-//    options.ListenAnyIP(80); 
-//    options.ListenAnyIP(443, listen =>
-//    {
-//        const string pfxPath = @"C:\Users\Administrator\Desktop\scs1750424505694_origami7023.cn_IIS\scs1750424505694_origami7023.cn_server.pfx";
-//        const string pfxPwd = "Kn9?cgGxZ9xxXBEf";      
-
-//        listen.UseHttps(pfxPath, pfxPwd);
-//    });
-
-//    options.Limits.MaxConcurrentConnections = 20;
-//    options.Limits.MaxConcurrentUpgradedConnections = 20;
-//});
-
 
 var app = builder.Build();
 
+// Configure the HTTP request pipeline
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
 
-
 app.UseHttpsRedirection();
-
 app.UseStaticFiles();
+
+// Add domain routing middleware FIRST
+app.UseMiddleware<DomainRoutingMiddleware>();
+
+// Add security middleware AFTER domain routing
+app.UseMiddleware<SecurityMiddleware>();
+
 app.UseAntiforgery();
 
 app.MapRazorComponents<App>()
