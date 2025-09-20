@@ -31,30 +31,27 @@
             {
                 _logger.LogAccess(ip, "ADMIN_SUBDOMAIN_ACCESS", $"Host: {host}, Path: {path}");
 
-                // Redirect root admin domain to login
+                // admin 根跳转到登录
                 if (path == "/" || string.IsNullOrEmpty(path))
                 {
                     context.Response.Redirect("/admin/login");
                     return;
                 }
 
-                // Ensure admin paths are properly routed
-                if (!path.StartsWith("/admin"))
+                // 不要重写这些系统路径
+                bool isSystemPath =
+                    path.StartsWith("/_framework", StringComparison.OrdinalIgnoreCase) ||
+                    path.StartsWith("/_blazor", StringComparison.OrdinalIgnoreCase) ||
+                    path.StartsWith("/_content", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("/favicon.ico", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("/robots.txt", StringComparison.OrdinalIgnoreCase);
+
+                // 仅当既不是 /admin 开头、也不是系统路径时，才加前缀
+                if (!path.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) && !isSystemPath)
                 {
                     var newPath = "/admin" + path;
                     context.Request.Path = newPath;
                     _logger.LogAccess(ip, "ADMIN_PATH_REWRITE", $"Rewritten: {path} -> {newPath}");
-                }
-            }
-            else
-            {
-                // Block access to admin paths from main domain (except localhost)
-                if (path.StartsWith("/admin") && !host.Contains("localhost"))
-                {
-                    _logger.LogAccess(ip, "ADMIN_ACCESS_BLOCKED", $"Admin access attempt from main domain: {host}");
-                    context.Response.StatusCode = 404;
-                    await context.Response.WriteAsync("Not Found");
-                    return;
                 }
             }
 
