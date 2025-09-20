@@ -615,6 +615,36 @@ else
         var uptime = DateTime.Now - StartTime;
         return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
     }
+
+    private string FormatActionType(string action)
+    {
+        return action switch
+        {
+            "ACCESS" => "页面访问",
+            "BLAZOR_CONNECTION_UP" => "连接建立",
+            "BLAZOR_CONNECTION_DOWN" => "连接断开",
+            "LOCALHOST_ADMIN_ACCESS" => "本地管理访问",
+            "ADMIN_SUBDOMAIN_ACCESS" => "管理域名访问",
+            "ADMIN_PATH_REWRITE" => "路径重写",
+            "ADMIN_ACCESS_BLOCKED" => "管理访问被阻止",
+            "ACCESS_DENIED_BANNED" => "访问被拒绝(IP封禁)",
+            "ACCESS_DENIED_LOCKDOWN" => "访问被拒绝(系统锁定)",
+            "SECURITY_DDOS_DETECTED" => "检测到DDoS攻击",
+            "SECURITY_BRUTE_FORCE_DETECTED" => "检测到暴力破解",
+            "SECURITY_IP_BANNED" => "IP地址被封禁",
+            "SECURITY_ADMIN_LOCKDOWN" => "管理面板锁定",
+            "ADMIN_LOGIN_SUCCESS" => "管理员登录成功",
+            "ADMIN_LOGIN_FAILED" => "管理员登录失败",
+            "ADMIN_LOGOUT" => "管理员退出登录",
+            "ADMIN_AUTH_COOKIE_SET" => "设置认证Cookie",
+            "EMAIL_ALERT_TRIGGERED" => "邮件警报触发",
+            "QUERY_VACANT_ROOMS" => "查询空教室",
+            "QUERY_ROOM_USAGE" => "查询教室使用情况",
+            "QUERY_RESULT" => "查询结果",
+            "ERROR_FILE_NOT_FOUND" => "文件未找到错误",
+            _ => action // 如果没有匹配的，返回原始值
+        };
+    }
 }
 
 
@@ -669,6 +699,65 @@ FILE: Components\Pages\AdminLogin.razor
         </div>
     }
 </div>
+
+<style>
+    .loading-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+
+    .admin-dashboard {
+        padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #e1e5e9;
+    }
+
+        .dashboard-header h1 {
+            color: #333;
+            margin: 0;
+        }
+
+    /* 这里添加我之前提供的所有表格优化样式 */
+    .logs-table-container {
+        overflow-x: auto;
+        max-height: 600px;
+        overflow-y: auto;
+        border: 1px solid #e1e5e9;
+        border-radius: 8px;
+        background: white;
+    }
+
+    .logs-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+        font-family: 'Consolas', 'Monaco', monospace;
+    }
+
+        .logs-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            border-bottom: 2px solid #5a67d8;
+            font-size: 0.9rem;
+        }
+
+</style>
 
 @code {
     private int counter = 0;
