@@ -1,0 +1,77 @@
+﻿/* Full height layout */
+html, body {
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.page-wrapper {
+    height: 100vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.page {
+    flex: 1 !important;
+    display: flex !important;
+    min-height: 0 !important;
+}
+
+/* Sidebar styling */
+.sidebar {
+    width: 250px !important;
+    flex-shrink: 0 !important;
+}
+
+/* Main content area with sticky footer */
+main {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+}
+
+.content {
+    flex: 1 !important;
+    overflow-y: auto !important;
+}
+
+/* Sticky footer - always at bottom of main area */
+.sticky-footer {
+    background-color: #f8f9fa !important;
+    border-top: 1px solid #dee2e6 !important;
+    padding: 15px !important;
+    text-align: center !important;
+    color: #6c757d !important;
+    font-size: 0.875rem !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+}
+
+    .sticky-footer a {
+        color: #007bff !important;
+        text-decoration: underline !important;
+    }
+
+        .sticky-footer a:hover {
+            color: #0056b3 !important;
+            text-decoration: underline !important;
+        }
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100% !important;
+        height: auto !important;
+    }
+
+    .page {
+        flex-direction: column !important;
+    }
+
+    .sticky-footer {
+        white-space: normal !important;
+        font-size: 0.8rem !important;
+        padding: 10px !important;
+    }
+}

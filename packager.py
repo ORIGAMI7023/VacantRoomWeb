@@ -12,21 +12,23 @@ def combine_code_files():
     # File patterns to include
     file_patterns = [
         "*.cs",           # All C# files
+        "*.css",          # All CSS files
         "*.razor",        # All Razor files
         "*.csproj",       # Project files
         "*.json",         # Configuration files
         "Components/**/*.razor",  # Razor components in subfolders
         "Pages/**/*.razor",       # Razor pages in subfolders
+        "wwwroot/**/*.css",       # CSS files in wwwroot subdirectories
     ]
     
     # Files to exclude (common build/temp files)
     exclude_patterns = [
         "bin/**",
         "obj/**", 
-        "wwwroot/**",
         ".vs/**",
         "*.user",
-        "*.cache"
+        "*.cache",
+        "bootstrap"
     ]
     
     print(f"Scanning directory: {base_dir}")
@@ -40,10 +42,13 @@ def combine_code_files():
         os.chdir(base_dir)  # Change to project directory
         
         all_files = []
-        
-        # Collect all matching files
+
+        # Collect all matching files with debugging
         for pattern in file_patterns:
+            print(f"Searching for pattern: {pattern}")
             matching_files = glob.glob(pattern, recursive=True)
+            print(f"  Found {len(matching_files)} files: {matching_files}")
+            
             for file_path in matching_files:
                 if os.path.isfile(file_path):
                     # Check if file should be excluded
@@ -51,10 +56,12 @@ def combine_code_files():
                     for exclude_pattern in exclude_patterns:
                         if any(part in file_path.replace('\\', '/') for part in exclude_pattern.split('/')):
                             should_exclude = True
+                            print(f"  Excluding {file_path} due to pattern {exclude_pattern}")
                             break
                     
                     if not should_exclude:
                         all_files.append(file_path)
+                        print(f"  Including: {file_path}")
         
         # Remove duplicates and sort
         all_files = sorted(list(set(all_files)))
@@ -65,7 +72,7 @@ def combine_code_files():
             print(f"  - {file_path}")
             
             try:
-                outf.write("\n" + "=" * 60 + "\n")
+                outf.write("\n" + "=" * 60 + "\n")  
                 outf.write(f"FILE: {file_path}\n")
                 outf.write("=" * 60 + "\n")
                 
@@ -89,20 +96,20 @@ def combine_code_files():
                     
             except Exception as e:
                 outf.write(f"[ERROR reading file: {e}]\n\n")
-                print(f"    ❌ Error reading {file_path}: {e}")
+                print(f"    Error reading {file_path}: {e}")
         
         outf.write("\n" + "=" * 80 + "\n")
         outf.write("END OF CODE FILES\n")
         outf.write("=" * 80 + "\n")
     
-    print(f"\n✅ All files combined successfully!")
-    print(f"📁 Output file: {output_file}")
-    print(f"📄 File size: {os.path.getsize(output_file) / 1024:.2f} KB")
-    print(f"📋 Total files included: {len(all_files)}")
+    print(f"\nAll files combined successfully!")
+    print(f"Output file: {output_file}")
+    print(f"File size: {os.path.getsize(output_file) / 1024:.2f} KB")
+    print(f"Total files included: {len(all_files)}")
 
 if __name__ == "__main__":
     try:
         combine_code_files()
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         input("Press Enter to exit...")
