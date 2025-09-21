@@ -17,7 +17,7 @@ namespace VacantRoomWeb
         private readonly string _logDirectory;
         private readonly ConcurrentQueue<LogEntry> _recentLogs = new();
         private readonly object _fileLock = new();
-        private const int MaxRecentLogs = 1000;
+        private const int MaxRecentLogs = 500; // 减少内存中的日志数量
 
         public EnhancedLoggingService()
         {
@@ -145,6 +145,61 @@ namespace VacantRoomWeb
             catch
             {
                 return new List<string>();
+            }
+        }
+
+        // 新增：清理内存日志
+        public void ClearRecentLogs()
+        {
+            while (_recentLogs.TryDequeue(out _)) { }
+        }
+
+        // 新增：获取日志统计信息
+        public Dictionary<string, int> GetLogStats()
+        {
+            var logs = _recentLogs.ToList();
+            var stats = new Dictionary<string, int>();
+
+            // 按操作类型统计
+            var actionGroups = logs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+
+            // 按IP统计
+            var ipCount = logs.Select(l => l.IP).Distinct().Count();
+
+            stats["TotalLogs"] = logs.Count;
+            stats["UniqueIPs"] = ipCount;
+            stats["SecurityEvents"] = actionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
+            stats["AdminEvents"] = actionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
+            stats["AccessEvents"] = actionGroups.GetValueOrDefault("ACCESS", 0);
+
+            return stats;
+        }
+
+        // 新增：删除旧日志文件
+        public void CleanupOldLogs(int daysToKeep = 30)
+        {
+            try
+            {
+                var cutoffDate = DateTime.Now.AddDays(-daysToKeep);
+                var logFiles = Directory.GetFiles(_logDirectory, "access-*.log");
+
+                foreach (var file in logFiles)
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    var dateStr = fileName.Replace("access-", "");
+
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
+                    {
+                        if (fileDate < cutoffDate)
+                        {
+                            File.Delete(file);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Silently fail
             }
         }
     }

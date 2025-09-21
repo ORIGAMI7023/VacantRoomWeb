@@ -57,8 +57,8 @@ else
             <div class="stat-card">
                 <div class="stat-icon">📊</div>
                 <div class="stat-content">
-                    <h3>@RecentLogs.Count</h3>
-                    <p>最近日志条目</p>
+                    <h3>@LogStats["TotalLogs"]</h3>
+                    <p>内存日志条目</p>
                 </div>
             </div>
         </div>
@@ -82,6 +82,9 @@ else
             <button @onclick="() => SetActiveTab(2)" class="tab-btn @(ActiveTab == 2 ? "active" : "")">
                 ⚙️ 系统信息
             </button>
+            <button @onclick="() => SetActiveTab(3)" class="tab-btn @(ActiveTab == 3 ? "active" : "")">
+                🗂️ 日志管理
+            </button>
         </div>
 
         <!-- 标签页内容 -->
@@ -92,7 +95,10 @@ else
                 <div class="logs-section">
                     <div class="section-header">
                         <h3>最近访问日志</h3>
-                        <button @onclick="RefreshLogs" class="btn btn-primary btn-sm">🔄 刷新</button>
+                        <div class="header-buttons">
+                            <button @onclick="RefreshLogs" class="btn btn-primary btn-sm">🔄 刷新</button>
+                            <button @onclick="ClearLogs" class="btn btn-warning btn-sm">🗑️ 清空内存日志</button>
+                        </div>
                     </div>
 
                     <div class="logs-table-container">
@@ -107,7 +113,7 @@ else
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var log in RecentLogs.Take(50))
+                                @foreach (var log in FilteredLogs.Take(50))
                                 {
                                     <tr class="@GetLogRowClass(log.Action)">
                                         <td class="time-cell">@log.Timestamp.ToString("MM-dd HH:mm:ss")</td>
@@ -167,6 +173,59 @@ else
                             <p><strong>活跃IP跟踪：</strong> @SecurityStats["ActiveIPTracking"]</p>
                             <p><strong>面板锁定：</strong> @((bool)SecurityStats["AdminPanelLocked"] ? "是" : "否")</p>
                             <p><strong>可用日志日期：</strong> @AvailableLogDates.Count 个</p>
+                        </div>
+
+                        <div class="info-card">
+                            <h4>日志统计</h4>
+                            <p><strong>内存日志总数：</strong> @LogStats["TotalLogs"]</p>
+                            <p><strong>唯一IP数：</strong> @LogStats["UniqueIPs"]</p>
+                            <p><strong>安全事件：</strong> @LogStats["SecurityEvents"]</p>
+                            <p><strong>管理事件：</strong> @LogStats["AdminEvents"]</p>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (ActiveTab == 3)
+            {
+                <!-- 日志管理标签页 -->
+                <div class="log-management-section">
+                    <h3>日志管理</h3>
+
+                    <div class="management-actions">
+                        <div class="action-group">
+                            <h4>日志过滤</h4>
+                            <div class="filter-controls">
+                                <select @bind="LogFilter" class="form-control">
+                                    <option value="ALL">所有日志</option>
+                                    <option value="SECURITY">安全事件</option>
+                                    <option value="ADMIN">管理操作</option>
+                                    <option value="ACCESS">页面访问</option>
+                                    <option value="CONNECTION">连接事件</option>
+                                </select>
+                                <button @onclick="ApplyFilter" class="btn btn-primary btn-sm">应用过滤</button>
+                            </div>
+                        </div>
+
+                        <div class="action-group">
+                            <h4>日志维护</h4>
+                            <div class="maintenance-controls">
+                                <button @onclick="ClearLogs" class="btn btn-warning">清空内存日志</button>
+                                <button @onclick="CleanupOldLogs" class="btn btn-danger">清理30天前日志文件</button>
+                                <button @onclick="ExportLogs" class="btn btn-info">导出当日日志</button>
+                            </div>
+                        </div>
+
+                        <div class="action-group">
+                            <h4>日志文件</h4>
+                            <div class="log-files">
+                                @foreach (var date in AvailableLogDates.Take(10))
+                                {
+                                    <div class="log-file-item">
+                                        <span class="log-date">@date</span>
+                                        <button @onclick="() => ViewLogFile(date)" class="btn btn-sm btn-outline-primary">查看</button>
+                                    </div>
+                                }
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -285,6 +344,11 @@ else
         justify-content: space-between;
         align-items: center;
         margin-bottom: 20px;
+    }
+
+    .header-buttons {
+        display: flex;
+        gap: 10px;
     }
 
     /* 优化的表格样式 */
@@ -461,6 +525,55 @@ else
             color: #333;
         }
 
+    /* 日志管理样式 */
+    .management-actions {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .action-group {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+    }
+
+        .action-group h4 {
+            margin-top: 0;
+            color: #333;
+        }
+
+    .filter-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .maintenance-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .log-files {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .log-file-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .log-date {
+        font-family: monospace;
+        font-weight: 600;
+    }
+
     /* 按钮样式 */
     .btn {
         padding: 8px 16px;
@@ -475,6 +588,27 @@ else
     .btn-primary {
         background: #667eea;
         color: white;
+    }
+
+    .btn-warning {
+        background: #ffc107;
+        color: #212529;
+    }
+
+    .btn-danger {
+        background: #dc3545;
+        color: white;
+    }
+
+    .btn-info {
+        background: #17a2b8;
+        color: white;
+    }
+
+    .btn-outline-primary {
+        background: transparent;
+        color: #667eea;
+        border: 1px solid #667eea;
     }
 
     .btn-outline-secondary {
@@ -500,6 +634,13 @@ else
         border: 1px solid #ffeaa7;
         color: #856404;
     }
+
+    .form-control {
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        background-color: white;
+    }
 </style>
 
 @code {
@@ -507,10 +648,13 @@ else
     private int ActiveTab = 0;
     private int CurrentConnections = 0;
     private List<LogEntry> RecentLogs = new();
+    private List<LogEntry> FilteredLogs = new();
     private List<SecurityEvent> SecurityEvents = new();
     private Dictionary<string, object> SecurityStats = new();
+    private Dictionary<string, int> LogStats = new();
     private List<string> AvailableLogDates = new();
     private DateTime StartTime = DateTime.Now;
+    private string LogFilter = "ALL";
 
     protected override async Task OnInitializedAsync()
     {
@@ -529,8 +673,10 @@ else
     {
         CurrentConnections = ConnectionService.GetCount();
         RecentLogs = LoggingService.GetRecentLogs(100);
+        FilteredLogs = RecentLogs;
         SecurityEvents = SecurityService.GetRecentSecurityEvents(30);
         SecurityStats = SecurityService.GetSecurityStats();
+        LogStats = LoggingService.GetLogStats();
         AvailableLogDates = LoggingService.GetAvailableLogDates();
 
         StateHasChanged();
@@ -544,6 +690,7 @@ else
     private async Task RefreshLogs()
     {
         RecentLogs = LoggingService.GetRecentLogs(100);
+        ApplyFilter();
         StateHasChanged();
     }
 
@@ -551,6 +698,45 @@ else
     {
         SecurityEvents = SecurityService.GetRecentSecurityEvents(30);
         SecurityStats = SecurityService.GetSecurityStats();
+        StateHasChanged();
+    }
+
+    private async Task ClearLogs()
+    {
+        LoggingService.ClearRecentLogs();
+        await RefreshLogs();
+    }
+
+    private async Task CleanupOldLogs()
+    {
+        LoggingService.CleanupOldLogs(30);
+        AvailableLogDates = LoggingService.GetAvailableLogDates();
+        StateHasChanged();
+    }
+
+    private async Task ExportLogs()
+    {
+        var today = DateTime.Now.ToString("yyyy-MM-dd");
+        // 实际实现可以生成下载文件
+        await JSRuntime.InvokeVoidAsync("alert", $"导出功能开发中，将导出 {today} 的日志文件");
+    }
+
+    private async Task ViewLogFile(string date)
+    {
+        // 实际实现可以显示特定日期的日志
+        await JSRuntime.InvokeVoidAsync("alert", $"查看功能开发中，将显示 {date} 的日志内容");
+    }
+
+    private void ApplyFilter()
+    {
+        FilteredLogs = LogFilter switch
+        {
+            "SECURITY" => RecentLogs.Where(l => l.Action.StartsWith("SECURITY_")).ToList(),
+            "ADMIN" => RecentLogs.Where(l => l.Action.Contains("ADMIN")).ToList(),
+            "ACCESS" => RecentLogs.Where(l => l.Action == "ACCESS").ToList(),
+            "CONNECTION" => RecentLogs.Where(l => l.Action.Contains("CONNECTION")).ToList(),
+            _ => RecentLogs
+        };
         StateHasChanged();
     }
 
@@ -596,6 +782,7 @@ else
             "BLAZOR_CONNECTION_DOWN" => "连接断开",
             "LOCALHOST_ADMIN_ACCESS" => "本地管理访问",
             "ADMIN_SUBDOMAIN_ACCESS" => "管理域名访问",
+            "ADMIN_SUBDOMAIN_REDIRECT" => "管理域名重定向",
             "ADMIN_PATH_REWRITE" => "路径重写",
             "ADMIN_ACCESS_BLOCKED" => "管理访问被阻止",
             "ACCESS_DENIED_BANNED" => "访问被拒绝(IP封禁)",

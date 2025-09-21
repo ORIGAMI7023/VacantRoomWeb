@@ -29,7 +29,12 @@ namespace VacantRoomWeb
             _ipTracker.SetClientIp(circuit.Id, ip);
 
             var count = _counter.Increment();
-            _logger.LogAccess(ip, "BLAZOR_CONNECTION_UP", $"Active connections: {count}", userAgent);
+
+            // 简化日志：只记录新的用户连接，不记录每个 SignalR 连接
+            if (count % 10 == 1 || count <= 5) // 仅在连接数变化较大时记录
+            {
+                _logger.LogAccess(ip, "BLAZOR_CONNECTION_UP", $"Active connections: {count}", TruncateUserAgent(userAgent));
+            }
 
             return Task.CompletedTask;
         }
@@ -42,14 +47,21 @@ namespace VacantRoomWeb
             {
                 _ipTracker.Remove(circuit.Id);
                 var count = _counter.Decrement();
-                _logger.LogAccess(ip, "BLAZOR_CONNECTION_DOWN", $"Active connections: {count}");
-            }
-            else
-            {
-                _logger.LogAccess("Unknown", "BLAZOR_CONNECTION_DOWN", "IP not tracked");
+
+                // 简化日志：只记录重要的连接断开
+                if (count % 10 == 0 || count <= 5)
+                {
+                    _logger.LogAccess(ip, "BLAZOR_CONNECTION_DOWN", $"Active connections: {count}");
+                }
             }
 
             return Task.CompletedTask;
+        }
+
+        private string TruncateUserAgent(string userAgent)
+        {
+            if (string.IsNullOrEmpty(userAgent)) return "";
+            return userAgent.Length > 50 ? userAgent.Substring(0, 50) + "..." : userAgent;
         }
     }
 }

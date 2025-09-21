@@ -45,10 +45,54 @@
                 return;
             }
 
-            // Log normal access
-            _logger.LogAccess(ip, "ACCESS", requestPath, userAgent);
+            // 优化：只记录重要的访问，过滤掉静态资源和框架文件
+            if (ShouldLogRequest(requestPath))
+            {
+                _logger.LogAccess(ip, "ACCESS", requestPath, userAgent);
+            }
 
             await _next(context);
+        }
+
+        private bool ShouldLogRequest(string path)
+        {
+            // 不记录静态资源和框架文件
+            var skipPatterns = new[]
+            {
+                "/_framework/",
+                "/_blazor/",
+                "/_content/",
+                "/css/",
+                "/js/",
+                "/lib/",
+                "/bootstrap/",
+                "/favicon.ico",
+                "/robots.txt",
+                ".css",
+                ".js",
+                ".map",
+                ".woff",
+                ".woff2",
+                ".ttf",
+                ".eot",
+                ".svg",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".ico"
+            };
+
+            foreach (var pattern in skipPatterns)
+            {
+                if (path.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            // 只记录页面访问和重要的API调用
+            return true;
         }
     }
 }
