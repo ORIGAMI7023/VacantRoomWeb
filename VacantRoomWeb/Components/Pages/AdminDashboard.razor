@@ -820,8 +820,20 @@ else
 
     private async Task HandleLogout()
     {
-        AuthService.SignOut();
-        await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
+        try
+        {
+            // 使用新的异步退出方法
+            await AuthService.SignOutAsync(JSRuntime);
+
+            // 强制跳转到登录页面
+            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
+        }
+        catch (Exception ex)
+        {
+            // 如果退出过程出错，仍然尝试跳转到登录页
+            await JSRuntime.InvokeVoidAsync("console.error", $"Logout error: {ex.Message}");
+            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
+        }
     }
 
     private string GetLogRowClass(string action)

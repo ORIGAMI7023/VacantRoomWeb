@@ -117,10 +117,43 @@ namespace VacantRoomWeb
             var context = _httpContextAccessor.HttpContext;
             if (context == null) return;
 
-            context.Response.Cookies.Delete("AdminAuth");
+            var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
+
+            try
+            {
+                // 尝试通过 HttpContext 删除 Cookie
+                context.Response.Cookies.Delete("AdminAuth");
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
+            }
+            catch (InvalidOperationException)
+            {
+                // 响应已经开始，无法通过 HttpContext 删除 Cookie
+                // 这种情况下，我们依赖前端 JavaScript 来删除 Cookie
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie will be deleted via JavaScript");
+            }
+        }
+
+        // 新增：通过 JavaScript 删除 Cookie 的异步方法
+        public async Task SignOutAsync(IJSRuntime jsRuntime)
+        {
+            var context = _httpContextAccessor.HttpContext;
+            if (context == null) return;
 
             var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
-            _logger.LogAccess(ip, "ADMIN_LOGOUT");
+
+            try
+            {
+                // 首先尝试通过 HttpContext 删除
+                context.Response.Cookies.Delete("AdminAuth");
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
+            }
+            catch (InvalidOperationException)
+            {
+                // 如果 HttpContext 方式失败，使用 JavaScript 删除
+                await jsRuntime.InvokeVoidAsync("eval",
+                    "document.cookie = 'AdminAuth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; samesite=strict'");
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via JavaScript");
+            }
         }
 
         private string CreateAuthToken(string username)
