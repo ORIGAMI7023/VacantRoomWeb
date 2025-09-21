@@ -6,6 +6,8 @@
 @inject ConnectionCounterService ConnectionService
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
+@inject ApplicationStartupService StartupService
+
 
 <PageTitle>管理后台</PageTitle>
 
@@ -159,14 +161,20 @@ else
             {
                 <!-- 系统信息标签页 -->
                 <div class="system-section">
-                    <h3>系统信息</h3>
+                    <div class="section-header">
+                        <h3>系统信息</h3>
+                        <button @onclick="RefreshSystemInfo" class="btn btn-primary btn-sm">🔄 刷新</button>
+                    </div>
 
                     <div class="info-grid">
                         <div class="info-card">
                             <h4>服务器状态</h4>
-                            <p><strong>运行时间：</strong> @GetUptime()</p>
+                            <p><strong>启动时间：</strong> @StartupService.GetApplicationStartTime().ToString("yyyy-MM-dd HH:mm:ss")</p>
+                            <p><strong>运行时间：</strong> @StartupService.GetDetailedUptime()</p>
                             <p><strong>运行环境：</strong> @Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")</p>
                             <p><strong>服务器时间：</strong> @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</p>
+                            <p><strong>机器名称：</strong> @Environment.MachineName</p>
+                            <p><strong>内存使用：</strong> @($"{Environment.WorkingSet / 1024 / 1024:F0} MB")</p>
                         </div>
 
                         <div class="info-card">
@@ -174,6 +182,8 @@ else
                             <p><strong>活跃IP跟踪：</strong> @SecurityStats.GetValueOrDefault("ActiveIPTracking", "未知")</p>
                             <p><strong>面板锁定：</strong> @((bool)SecurityStats.GetValueOrDefault("AdminPanelLocked", false) ? "是" : "否")</p>
                             <p><strong>可用日志日期：</strong> @AvailableLogDates.Count 个</p>
+                            <p><strong>当前连接数：</strong> @CurrentConnections</p>
+                            <p><strong>已封禁IP：</strong> @SecurityStats.GetValueOrDefault("TotalBannedIPs", "0")</p>
                         </div>
 
                         <div class="info-card">
@@ -884,4 +894,17 @@ else
             _ => action // 如果没有匹配的，返回原始值
         };
     }
+
+    private async Task RefreshSystemInfo()
+    {
+        // 刷新所有系统相关数据
+        LogStats = LoggingService.GetLogStats();
+        SecurityStats = SecurityService.GetSecurityStats();
+        CurrentConnections = ConnectionService.GetCount();
+        AvailableLogDates = LoggingService.GetAvailableLogDates();
+    
+        // 强制更新界面
+        StateHasChanged();
+    }
+
 }

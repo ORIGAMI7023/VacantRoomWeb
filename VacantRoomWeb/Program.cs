@@ -24,6 +24,7 @@ builder.Services.AddSingleton<EnhancedLoggingService>();
 builder.Services.AddSingleton<IEmailService, EmailService>();
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<AdminAuthService>();
+builder.Services.AddSingleton<ApplicationStartupService>();
 
 // Register notification service for component communication
 builder.Services.AddSingleton<NotificationService>();
