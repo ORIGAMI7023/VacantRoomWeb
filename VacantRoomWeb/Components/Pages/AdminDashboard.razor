@@ -185,6 +185,15 @@ else
                             <p><strong>今日管理事件：</strong> @LogStats["TodayAdminEvents"]</p>
                             <p><strong>日志文件大小：</strong> @LogStats["TodayLogFileSize"]</p>
                         </div>
+
+                        <div class="info-card debug-card">
+                            <h4>调试信息</h4>
+                            <p><strong>调试信息：</strong> @LogStats["DebugInfo"]</p>
+                            <p><strong>文件行数：</strong> @LogStats["DebugFileLines"]</p>
+                            <p><strong>日志目录：</strong> @LogStats["DebugLogDirectory"]</p>
+                            <p><strong>当前时间：</strong> @LogStats["DebugCurrentTime"]</p>
+                            <p><strong>今日日期：</strong> @LogStats["DebugTodayDate"]</p>
+                        </div>
                     </div>
                 </div>
             }
@@ -530,6 +539,21 @@ else
         .info-card h4 {
             margin-top: 0;
             color: #333;
+        }
+
+    .debug-card {
+        background: #ffe6e6;
+        border: 1px solid #ffcccc;
+    }
+
+        .debug-card h4 {
+            color: #cc0000;
+        }
+
+        .debug-card p {
+            font-family: monospace;
+            font-size: 0.85em;
+            word-break: break-all;
         }
 
     /* 日志管理样式 */

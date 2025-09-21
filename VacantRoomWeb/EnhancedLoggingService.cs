@@ -110,23 +110,40 @@ namespace VacantRoomWeb
 
             try
             {
-                var parts = line.Split(new[] { " IP:", " ACTION:", " PATH:", " DETAILS:", " UA:" }, StringSplitOptions.None);
+                // 修复解析逻辑：日志格式是 [时间] IP:xxx ACTION:xxx PATH:xxx DETAILS:xxx UA:xxx
+                if (!line.StartsWith("[")) return false;
 
-                if (parts.Length >= 6)
+                var timestampEnd = line.IndexOf(']');
+                if (timestampEnd == -1) return false;
+
+                var timestampStr = line.Substring(1, timestampEnd - 1);
+                logEntry.Timestamp = DateTime.Parse(timestampStr);
+
+                var remainingLine = line.Substring(timestampEnd + 1).Trim();
+
+                // 使用正确的分隔符解析
+                var parts = remainingLine.Split(new[] { " IP:", " ACTION:", " PATH:", " DETAILS:", " UA:" }, StringSplitOptions.None);
+
+                if (parts.Length >= 5)
                 {
-                    var timestampStr = parts[0].Trim('[', ']');
-                    logEntry.Timestamp = DateTime.Parse(timestampStr);
                     logEntry.IP = parts[1];
                     logEntry.Action = parts[2];
                     logEntry.RequestPath = parts[3];
                     logEntry.Details = parts[4];
-                    logEntry.UserAgent = parts[5];
+
+                    // UA可能为空或者不存在
+                    if (parts.Length > 5)
+                    {
+                        logEntry.UserAgent = parts[5];
+                    }
+
                     return true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore parse errors
+                // 调试：记录解析失败的行
+                // 这在生产环境中应该被移除
             }
 
             return false;
@@ -154,11 +171,16 @@ namespace VacantRoomWeb
             while (_recentLogs.TryDequeue(out _)) { }
         }
 
-        // 获取日志统计信息 - 区分内存和当日文件
+        // 改进的日志统计方法，包含调试信息
         public Dictionary<string, object> GetLogStats()
         {
             var memoryLogs = _recentLogs.ToList();
-            var todayLogs = GetLogsByDate(DateTime.Today);
+            var today = DateTime.Today;
+            var todayLogs = GetLogsByDate(today);
+
+            // 添加调试信息
+            var todayFileName = $"access-{today:yyyy-MM-dd}.log";
+            var todayFilePath = Path.Combine(_logDirectory, todayFileName);
 
             var stats = new Dictionary<string, object>();
 
@@ -180,11 +202,28 @@ namespace VacantRoomWeb
             stats["TodaySecurityEvents"] = todayActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
             stats["TodayAdminEvents"] = todayActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
 
-            // 文件大小信息
-            var todayFileName = $"access-{DateTime.Today:yyyy-MM-dd}.log";
-            var todayFilePath = Path.Combine(_logDirectory, todayFileName);
+            // 详细调试信息
+            var fileExists = File.Exists(todayFilePath);
+            var totalLines = 0;
+            var parsedLines = todayLogs.Count;
 
-            if (File.Exists(todayFilePath))
+            if (fileExists)
+            {
+                try
+                {
+                    totalLines = File.ReadAllLines(todayFilePath).Length;
+                }
+                catch
+                {
+                    totalLines = -1;
+                }
+            }
+
+            stats["DebugInfo"] = $"文件存在: {fileExists}, 总行数: {totalLines}, 解析成功: {parsedLines}";
+            stats["DebugFileLines"] = totalLines;
+            stats["DebugParsedLines"] = parsedLines;
+
+            if (fileExists)
             {
                 var fileInfo = new FileInfo(todayFilePath);
                 stats["TodayLogFileSize"] = $"{fileInfo.Length / 1024.0:F1} KB";
@@ -193,6 +232,12 @@ namespace VacantRoomWeb
             {
                 stats["TodayLogFileSize"] = "0 KB";
             }
+
+            // 添加更多调试信息
+            stats["DebugLogDirectory"] = _logDirectory;
+            stats["DebugCurrentTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            stats["DebugTodayDate"] = today.ToString("yyyy-MM-dd");
+            stats["DebugFilePath"] = todayFilePath;
 
             return stats;
         }
@@ -274,6 +319,13 @@ namespace VacantRoomWeb
             {
                 return result;
             }
+        }
+
+        // 新增：强制刷新统计的方法
+        public void ForceRefreshStats()
+        {
+            // 这个方法可以用来触发统计更新
+            // 目前主要是为了调试使用
         }
     }
 }
