@@ -12,17 +12,25 @@ namespace VacantRoomWeb
         private readonly ClientConnectionTracker _ipTracker;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly EnhancedLoggingService _logger;
+        private readonly IConfiguration _configuration;
+
+        // 用于控制用户查询频率，避免日志膨胀
+        private readonly Dictionary<string, DateTime> _lastQueryTime = new();
+        private readonly Dictionary<string, int> _queryCount = new();
+        private readonly object _queryLock = new();
 
         public VacantRoomService(
             ConnectionCounterService counter,
             ClientConnectionTracker ipTracker,
             IHttpContextAccessor httpContextAccessor,
-            EnhancedLoggingService logger)
+            EnhancedLoggingService logger,
+            IConfiguration configuration)
         {
             _counter = counter;
             _ipTracker = ipTracker;
             _httpContextAccessor = httpContextAccessor;
             _logger = logger;
+            _configuration = configuration;
         }
 
         List<string> list = new List<string> { "A101", "A102", "A103", "A104", "A105", "A106",
@@ -68,44 +76,67 @@ namespace VacantRoomWeb
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
             var userAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString() ?? "";
 
-            _logger.LogAccess(ip, "QUERY_VACANT_ROOMS", $"{campus.Substring(0, 2)} {weekday} {period} {building}楼 {week}", userAgent);
+            // 智能日志记录：避免重复记录相同用户的频繁查询
+            bool shouldLog = ShouldLogUserQuery(ip, "VACANT_ROOMS");
+
+            if (shouldLog)
+            {
+                // 简化日志信息，去除敏感细节
+                var logDetails = $"{campus.Substring(0, 2)} {weekday} {period} {building}楼 {week}";
+                _logger.LogAccess(ip, "QUERY_VACANT_ROOMS", logDetails, TruncateUserAgent(userAgent));
+            }
 
             var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
             if (!File.Exists(filePath))
             {
+                // 错误情况必须记录
                 _logger.LogAccess(ip, "ERROR_FILE_NOT_FOUND", filePath, userAgent);
                 return new List<string>();
             }
 
             var occupiedRooms = new HashSet<string>();
 
-            using var workbook = new XLWorkbook(filePath);
-            var sheet = workbook.Worksheets.First();
-
-            foreach (var row in sheet.RowsUsed().Skip(1))
+            try
             {
-                var rowCampus = row.Cell(10).GetString();
-                var rowTime = row.Cell(14).GetString();
-                var rowWeeks = row.Cell(15).GetString();
-                var room = row.Cell(16).GetString();
+                using var workbook = new XLWorkbook(filePath);
+                var sheet = workbook.Worksheets.First();
 
-                if (!room.Any()) continue;
+                foreach (var row in sheet.RowsUsed().Skip(1))
+                {
+                    var rowCampus = row.Cell(10).GetString();
+                    var rowTime = row.Cell(14).GetString();
+                    var rowWeeks = row.Cell(15).GetString();
+                    var room = row.Cell(16).GetString();
 
-                if (rowCampus != campus) continue;
-                if (!IsPeriodMatch(rowTime, weekday, period)) continue;
-                if (!IsWeekMatch(rowWeeks, week)) continue;
+                    if (!room.Any()) continue;
 
-                occupiedRooms.Add(room);
+                    if (rowCampus != campus) continue;
+                    if (!IsPeriodMatch(rowTime, weekday, period)) continue;
+                    if (!IsWeekMatch(rowWeeks, week)) continue;
+
+                    occupiedRooms.Add(room);
+                }
+
+                var allRooms = list;
+                var result = allRooms
+                    .Where(r => !occupiedRooms.Contains(r) &&
+                                (building == "所有" || r.StartsWith(building)))
+                    .ToList();
+
+                // 只在需要时记录查询结果
+                if (shouldLog)
+                {
+                    _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} vacant rooms", "");
+                }
+
+                return result;
             }
-
-            var allRooms = list;
-            var result = allRooms
-                .Where(r => !occupiedRooms.Contains(r) &&
-                            (building == "所有" || r.StartsWith(building)))
-                .ToList();
-
-            _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} vacant rooms", userAgent);
-            return result;
+            catch (Exception ex)
+            {
+                // 异常必须记录
+                _logger.LogAccess(ip, "ERROR_QUERY_EXCEPTION", $"Exception: {ex.Message}", userAgent);
+                return new List<string>();
+            }
         }
 
         public List<RoomUsage> GetRoomUsage(string campus, string roomNumber, string weekday, string week)
@@ -113,7 +144,13 @@ namespace VacantRoomWeb
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
             var userAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString() ?? "";
 
-            _logger.LogAccess(ip, "QUERY_ROOM_USAGE", $"{campus.Substring(0, 2)} {roomNumber} {weekday} {week}", userAgent);
+            bool shouldLog = ShouldLogUserQuery(ip, "ROOM_USAGE");
+
+            if (shouldLog)
+            {
+                var logDetails = $"{campus.Substring(0, 2)} {roomNumber} {weekday} {week}";
+                _logger.LogAccess(ip, "QUERY_ROOM_USAGE", logDetails, TruncateUserAgent(userAgent));
+            }
 
             var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
             if (!File.Exists(filePath))
@@ -124,51 +161,111 @@ namespace VacantRoomWeb
 
             var roomUsages = new List<RoomUsage>();
 
-            using var workbook = new XLWorkbook(filePath);
-            var sheet = workbook.Worksheets.First();
-
-            foreach (var row in sheet.RowsUsed().Skip(1))
+            try
             {
-                var rowCampus = row.Cell(10).GetString();
-                var rowTime = row.Cell(14).GetString();
-                var rowWeeks = row.Cell(15).GetString();
-                var room = row.Cell(16).GetString();
-                var courseName = row.Cell(5).GetString();
-                var teacher = row.Cell(12).GetString();
+                using var workbook = new XLWorkbook(filePath);
+                var sheet = workbook.Worksheets.First();
 
-                if (string.IsNullOrEmpty(room)) continue;
-                if (rowCampus != campus) continue;
-                if (room != roomNumber) continue;
-                if (!IsWeekdayMatch(rowTime, weekday)) continue;
-                if (!IsWeekMatch(rowWeeks, week)) continue;
-
-                var period = ExtractPeriodFromTime(rowTime);
-                var timeRange = GetTimeRangeForPeriod(period);
-
-                roomUsages.Add(new RoomUsage
+                foreach (var row in sheet.RowsUsed().Skip(1))
                 {
-                    Period = period,
-                    TimeRange = timeRange,
-                    CourseName = courseName,
-                    Teacher = teacher,
-                });
+                    var rowCampus = row.Cell(10).GetString();
+                    var rowTime = row.Cell(14).GetString();
+                    var rowWeeks = row.Cell(15).GetString();
+                    var room = row.Cell(16).GetString();
+                    var courseName = row.Cell(5).GetString();
+                    var teacher = row.Cell(12).GetString();
+
+                    if (string.IsNullOrEmpty(room)) continue;
+                    if (rowCampus != campus) continue;
+                    if (room != roomNumber) continue;
+                    if (!IsWeekdayMatch(rowTime, weekday)) continue;
+                    if (!IsWeekMatch(rowWeeks, week)) continue;
+
+                    var period = ExtractPeriodFromTime(rowTime);
+                    var timeRange = GetTimeRangeForPeriod(period);
+
+                    roomUsages.Add(new RoomUsage
+                    {
+                        Period = period,
+                        TimeRange = timeRange,
+                        CourseName = courseName,
+                        Teacher = teacher,
+                    });
+                }
+
+                var periodOrder = new Dictionary<string, int>
+                {
+                    { "1-2节", 1 }, { "01-02节", 1 },
+                    { "3-4节", 2 }, { "03-04节", 2 },
+                    { "5-6节", 3 }, { "05-06节", 3 },
+                    { "7-8节", 4 }, { "07-08节", 4 },
+                    { "9-10节", 5 }, { "09-10节", 5 },
+                    { "9-11节", 6 }, { "09-11节", 6 },
+                    { "10-11节", 7 }, { "10-12节", 8 }
+                };
+
+                var result = roomUsages.OrderBy(r => periodOrder.GetValueOrDefault(r.Period, 999)).ToList();
+
+                if (shouldLog)
+                {
+                    _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} room usage records", "");
+                }
+
+                return result;
             }
-
-            var periodOrder = new Dictionary<string, int>
+            catch (Exception ex)
             {
-                { "1-2节", 1 }, { "01-02节", 1 },
-                { "3-4节", 2 }, { "03-04节", 2 },
-                { "5-6节", 3 }, { "05-06节", 3 },
-                { "7-8节", 4 }, { "07-08节", 4 },
-                { "9-10节", 5 }, { "09-10节", 5 },
-                { "9-11节", 6 }, { "09-11节", 6 },
-                { "10-11节", 7 }, { "10-12节", 8 }
-            };
+                _logger.LogAccess(ip, "ERROR_QUERY_EXCEPTION", $"Exception: {ex.Message}", userAgent);
+                return new List<RoomUsage>();
+            }
+        }
 
-            var result = roomUsages.OrderBy(r => periodOrder.GetValueOrDefault(r.Period, 999)).ToList();
-            _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} room usage records", userAgent);
+        // 智能查询日志记录策略
+        private bool ShouldLogUserQuery(string ip, string queryType)
+        {
+            lock (_queryLock)
+            {
+                var now = DateTime.Now;
+                var key = $"{ip}_{queryType}";
 
-            return result;
+                // 清理过期记录
+                CleanupOldQueryRecords();
+
+                // 更新查询计数
+                _queryCount[key] = _queryCount.GetValueOrDefault(key, 0) + 1;
+                _lastQueryTime[key] = now;
+
+                // 检查是否需要记录高频警告
+                if (_queryCount[key] > 50) // 提高阈值，5分钟内超过50次才警告
+                {
+                    _logger.LogAccess(ip, "QUERY_HIGH_FREQUENCY", $"High frequency queries: {_queryCount[key]} in 5min", "");
+                    _queryCount[key] = 0; // 重置计数避免重复警告
+                }
+
+                // 所有正常查询都记录，不过滤重复查询
+                return true;
+            }
+        }
+
+        private void CleanupOldQueryRecords()
+        {
+            var cutoff = DateTime.Now.AddMinutes(-5);
+            var keysToRemove = _lastQueryTime
+                .Where(kvp => kvp.Value < cutoff)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in keysToRemove)
+            {
+                _lastQueryTime.Remove(key);
+                _queryCount.Remove(key);
+            }
+        }
+
+        private string TruncateUserAgent(string userAgent)
+        {
+            if (string.IsNullOrEmpty(userAgent)) return "";
+            return userAgent.Length > 30 ? userAgent.Substring(0, 30) + "..." : userAgent;
         }
 
         public List<string> GetRoomsForBuilding(string building)
