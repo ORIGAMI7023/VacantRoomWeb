@@ -11,7 +11,7 @@ builder.Services.AddRazorComponents()
 builder.Services.AddSignalR(options =>
 {
     options.MaximumReceiveMessageSize = null;
-    options.EnableDetailedErrors = true; // 开发环境启用详细错误
+    options.EnableDetailedErrors = true;
 });
 
 // Register existing services
@@ -24,6 +24,9 @@ builder.Services.AddSingleton<EnhancedLoggingService>();
 builder.Services.AddSingleton<IEmailService, EmailService>();
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<AdminAuthService>();
+
+// Register notification service for component communication
+builder.Services.AddSingleton<NotificationService>();
 
 // Register updated services with new dependencies
 builder.Services.AddSingleton<VacantRoomService>();

@@ -13,6 +13,7 @@ namespace VacantRoomWeb
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly EnhancedLoggingService _logger;
         private readonly IConfiguration _configuration;
+        private readonly NotificationService _notificationService;
 
         // 用于控制用户查询频率，避免日志膨胀
         private readonly Dictionary<string, DateTime> _lastQueryTime = new();
@@ -24,13 +25,15 @@ namespace VacantRoomWeb
             ClientConnectionTracker ipTracker,
             IHttpContextAccessor httpContextAccessor,
             EnhancedLoggingService logger,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            NotificationService notificationService)
         {
             _counter = counter;
             _ipTracker = ipTracker;
             _httpContextAccessor = httpContextAccessor;
             _logger = logger;
             _configuration = configuration;
+            _notificationService = notificationService;
         }
 
         List<string> list = new List<string> { "A101", "A102", "A103", "A104", "A105", "A106",
@@ -84,6 +87,9 @@ namespace VacantRoomWeb
                 // 简化日志信息，去除敏感细节
                 var logDetails = $"{campus.Substring(0, 2)} {weekday} {period} {building}楼 {week}";
                 _logger.LogAccess(ip, "QUERY_VACANT_ROOMS", logDetails, TruncateUserAgent(userAgent));
+
+                // 通知管理后台有新的日志
+                _notificationService.NotifyLogsUpdated();
             }
 
             var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
@@ -91,6 +97,7 @@ namespace VacantRoomWeb
             {
                 // 错误情况必须记录
                 _logger.LogAccess(ip, "ERROR_FILE_NOT_FOUND", filePath, userAgent);
+                _notificationService.NotifyLogsUpdated();
                 return new List<string>();
             }
 
@@ -127,6 +134,7 @@ namespace VacantRoomWeb
                 if (shouldLog)
                 {
                     _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} vacant rooms", "");
+                    _notificationService.NotifyLogsUpdated();
                 }
 
                 return result;
@@ -135,6 +143,7 @@ namespace VacantRoomWeb
             {
                 // 异常必须记录
                 _logger.LogAccess(ip, "ERROR_QUERY_EXCEPTION", $"Exception: {ex.Message}", userAgent);
+                _notificationService.NotifyLogsUpdated();
                 return new List<string>();
             }
         }
@@ -150,12 +159,14 @@ namespace VacantRoomWeb
             {
                 var logDetails = $"{campus.Substring(0, 2)} {roomNumber} {weekday} {week}";
                 _logger.LogAccess(ip, "QUERY_ROOM_USAGE", logDetails, TruncateUserAgent(userAgent));
+                _notificationService.NotifyLogsUpdated();
             }
 
             var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
             if (!File.Exists(filePath))
             {
                 _logger.LogAccess(ip, "ERROR_FILE_NOT_FOUND", filePath, userAgent);
+                _notificationService.NotifyLogsUpdated();
                 return new List<RoomUsage>();
             }
 
@@ -209,6 +220,7 @@ namespace VacantRoomWeb
                 if (shouldLog)
                 {
                     _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} room usage records", "");
+                    _notificationService.NotifyLogsUpdated();
                 }
 
                 return result;
@@ -216,6 +228,7 @@ namespace VacantRoomWeb
             catch (Exception ex)
             {
                 _logger.LogAccess(ip, "ERROR_QUERY_EXCEPTION", $"Exception: {ex.Message}", userAgent);
+                _notificationService.NotifyLogsUpdated();
                 return new List<RoomUsage>();
             }
         }

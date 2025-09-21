@@ -706,6 +706,7 @@ else
     private List<(string Date, int Count, string Size)> LogFileInfo = new();
     private DateTime StartTime = DateTime.Now;
     private string LogFilter = "ALL";
+    private Timer? _refreshTimer;
 
     protected override async Task OnInitializedAsync()
     {
@@ -718,6 +719,23 @@ else
         }
 
         await LoadDashboardData();
+
+        // 设置定时刷新 - 每30秒自动刷新统计数据
+        _refreshTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                LogStats = LoggingService.GetLogStats();
+                SecurityStats = SecurityService.GetSecurityStats();
+                CurrentConnections = ConnectionService.GetCount();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
     }
 
     private async Task LoadDashboardData()
@@ -750,6 +768,14 @@ else
     {
         SecurityEvents = SecurityService.GetRecentSecurityEvents(30);
         SecurityStats = SecurityService.GetSecurityStats();
+        StateHasChanged();
+    }
+
+    private async Task RefreshStats()
+    {
+        LogStats = LoggingService.GetLogStats();
+        SecurityStats = SecurityService.GetSecurityStats();
+        CurrentConnections = ConnectionService.GetCount();
         StateHasChanged();
     }
 

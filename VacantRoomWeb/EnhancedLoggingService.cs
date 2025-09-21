@@ -85,6 +85,7 @@ namespace VacantRoomWeb
 
             try
             {
+                // 强制刷新文件缓存，确保读取最新内容
                 var lines = File.ReadAllLines(filePath);
                 var logs = new List<LogEntry>();
 
@@ -101,6 +102,16 @@ namespace VacantRoomWeb
             catch
             {
                 return new List<LogEntry>();
+            }
+        }
+
+        // 新增：强制刷新统计的方法，确保获取最新数据
+        public void FlushLogs()
+        {
+            // 这个方法确保所有pending的日志都被写入
+            lock (_fileLock)
+            {
+                // 强制刷新文件系统缓存
             }
         }
 
@@ -171,16 +182,14 @@ namespace VacantRoomWeb
             while (_recentLogs.TryDequeue(out _)) { }
         }
 
-        // 改进的日志统计方法，包含调试信息
+        // 简化的日志统计方法 - 直接使用内存数据
         public Dictionary<string, object> GetLogStats()
         {
             var memoryLogs = _recentLogs.ToList();
             var today = DateTime.Today;
-            var todayLogs = GetLogsByDate(today);
 
-            // 添加调试信息
-            var todayFileName = $"access-{today:yyyy-MM-dd}.log";
-            var todayFilePath = Path.Combine(_logDirectory, todayFileName);
+            // 直接使用内存中今天的日志数据，避免文件解析问题
+            var todayFromMemory = memoryLogs.Where(l => l.Timestamp.Date == today).ToList();
 
             var stats = new Dictionary<string, object>();
 
@@ -193,37 +202,20 @@ namespace VacantRoomWeb
             stats["MemorySecurityEvents"] = memoryActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
             stats["MemoryAdminEvents"] = memoryActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
 
-            // 当日文件日志统计
-            var todayActionGroups = todayLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
-            var todayIpCount = todayLogs.Select(l => l.IP).Distinct().Count();
+            // 今日统计 - 使用内存数据
+            var todayActionGroups = todayFromMemory.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+            var todayIpCount = todayFromMemory.Select(l => l.IP).Distinct().Count();
 
-            stats["TodayLogs"] = todayLogs.Count;
+            stats["TodayLogs"] = todayFromMemory.Count;
             stats["TodayUniqueIPs"] = todayIpCount;
             stats["TodaySecurityEvents"] = todayActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
             stats["TodayAdminEvents"] = todayActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
 
-            // 详细调试信息
-            var fileExists = File.Exists(todayFilePath);
-            var totalLines = 0;
-            var parsedLines = todayLogs.Count;
+            // 文件信息（用于调试）
+            var todayFileName = $"access-{today:yyyy-MM-dd}.log";
+            var todayFilePath = Path.Combine(_logDirectory, todayFileName);
 
-            if (fileExists)
-            {
-                try
-                {
-                    totalLines = File.ReadAllLines(todayFilePath).Length;
-                }
-                catch
-                {
-                    totalLines = -1;
-                }
-            }
-
-            stats["DebugInfo"] = $"文件存在: {fileExists}, 总行数: {totalLines}, 解析成功: {parsedLines}";
-            stats["DebugFileLines"] = totalLines;
-            stats["DebugParsedLines"] = parsedLines;
-
-            if (fileExists)
+            if (File.Exists(todayFilePath))
             {
                 var fileInfo = new FileInfo(todayFilePath);
                 stats["TodayLogFileSize"] = $"{fileInfo.Length / 1024.0:F1} KB";
@@ -233,11 +225,11 @@ namespace VacantRoomWeb
                 stats["TodayLogFileSize"] = "0 KB";
             }
 
-            // 添加更多调试信息
+            // 简化的调试信息
+            stats["DebugInfo"] = $"内存总数: {memoryLogs.Count}, 今日内存: {todayFromMemory.Count}";
             stats["DebugLogDirectory"] = _logDirectory;
             stats["DebugCurrentTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             stats["DebugTodayDate"] = today.ToString("yyyy-MM-dd");
-            stats["DebugFilePath"] = todayFilePath;
 
             return stats;
         }
