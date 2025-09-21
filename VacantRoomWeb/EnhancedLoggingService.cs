@@ -17,7 +17,7 @@ namespace VacantRoomWeb
         private readonly string _logDirectory;
         private readonly ConcurrentQueue<LogEntry> _recentLogs = new();
         private readonly object _fileLock = new();
-        private const int MaxRecentLogs = 500; // 减少内存中的日志数量
+        private const int MaxRecentLogs = 500;
 
         public EnhancedLoggingService()
         {
@@ -148,34 +148,75 @@ namespace VacantRoomWeb
             }
         }
 
-        // 新增：清理内存日志
+        // 清理内存日志
         public void ClearRecentLogs()
         {
             while (_recentLogs.TryDequeue(out _)) { }
         }
 
-        // 新增：获取日志统计信息
-        public Dictionary<string, int> GetLogStats()
+        // 获取日志统计信息 - 区分内存和当日文件
+        public Dictionary<string, object> GetLogStats()
         {
-            var logs = _recentLogs.ToList();
-            var stats = new Dictionary<string, int>();
+            var memoryLogs = _recentLogs.ToList();
+            var todayLogs = GetLogsByDate(DateTime.Today);
 
-            // 按操作类型统计
-            var actionGroups = logs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+            var stats = new Dictionary<string, object>();
 
-            // 按IP统计
-            var ipCount = logs.Select(l => l.IP).Distinct().Count();
+            // 内存日志统计
+            var memoryActionGroups = memoryLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+            var memoryIpCount = memoryLogs.Select(l => l.IP).Distinct().Count();
 
-            stats["TotalLogs"] = logs.Count;
-            stats["UniqueIPs"] = ipCount;
-            stats["SecurityEvents"] = actionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
-            stats["AdminEvents"] = actionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
-            stats["AccessEvents"] = actionGroups.GetValueOrDefault("ACCESS", 0);
+            stats["MemoryLogs"] = memoryLogs.Count;
+            stats["MemoryUniqueIPs"] = memoryIpCount;
+            stats["MemorySecurityEvents"] = memoryActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
+            stats["MemoryAdminEvents"] = memoryActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
+
+            // 当日文件日志统计
+            var todayActionGroups = todayLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+            var todayIpCount = todayLogs.Select(l => l.IP).Distinct().Count();
+
+            stats["TodayLogs"] = todayLogs.Count;
+            stats["TodayUniqueIPs"] = todayIpCount;
+            stats["TodaySecurityEvents"] = todayActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
+            stats["TodayAdminEvents"] = todayActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
+
+            // 文件大小信息
+            var todayFileName = $"access-{DateTime.Today:yyyy-MM-dd}.log";
+            var todayFilePath = Path.Combine(_logDirectory, todayFileName);
+
+            if (File.Exists(todayFilePath))
+            {
+                var fileInfo = new FileInfo(todayFilePath);
+                stats["TodayLogFileSize"] = $"{fileInfo.Length / 1024.0:F1} KB";
+            }
+            else
+            {
+                stats["TodayLogFileSize"] = "0 KB";
+            }
 
             return stats;
         }
 
-        // 新增：删除旧日志文件
+        // 获取当日日志文件的行数（快速方法）
+        public int GetTodayLogCount()
+        {
+            var fileName = $"access-{DateTime.Today:yyyy-MM-dd}.log";
+            var filePath = Path.Combine(_logDirectory, fileName);
+
+            if (!File.Exists(filePath))
+                return 0;
+
+            try
+            {
+                return File.ReadAllLines(filePath).Length;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        // 删除旧日志文件
         public void CleanupOldLogs(int daysToKeep = 30)
         {
             try
@@ -200,6 +241,38 @@ namespace VacantRoomWeb
             catch
             {
                 // Silently fail
+            }
+        }
+
+        // 获取日志文件信息
+        public List<(string Date, int Count, string Size)> GetLogFileInfo()
+        {
+            var result = new List<(string Date, int Count, string Size)>();
+
+            try
+            {
+                var logFiles = Directory.GetFiles(_logDirectory, "access-*.log");
+
+                foreach (var file in logFiles)
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    var dateStr = fileName.Replace("access-", "");
+
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
+                    {
+                        var fileInfo = new FileInfo(file);
+                        var lineCount = File.ReadAllLines(file).Length;
+                        var size = $"{fileInfo.Length / 1024.0:F1} KB";
+
+                        result.Add((dateStr, lineCount, size));
+                    }
+                }
+
+                return result.OrderByDescending(r => r.Date).ToList();
+            }
+            catch
+            {
+                return result;
             }
         }
     }

@@ -57,8 +57,9 @@ else
             <div class="stat-card">
                 <div class="stat-icon">📊</div>
                 <div class="stat-content">
-                    <h3>@LogStats["TotalLogs"]</h3>
-                    <p>内存日志条目</p>
+                    <h3>@LogStats["TodayLogs"]</h3>
+                    <p>今日日志总数</p>
+                    <small>内存: @LogStats["MemoryLogs"] 条</small>
                 </div>
             </div>
         </div>
@@ -176,11 +177,13 @@ else
                         </div>
 
                         <div class="info-card">
-                            <h4>日志统计</h4>
-                            <p><strong>内存日志总数：</strong> @LogStats["TotalLogs"]</p>
-                            <p><strong>唯一IP数：</strong> @LogStats["UniqueIPs"]</p>
-                            <p><strong>安全事件：</strong> @LogStats["SecurityEvents"]</p>
-                            <p><strong>管理事件：</strong> @LogStats["AdminEvents"]</p>
+                            <h4>日志统计（详细）</h4>
+                            <p><strong>今日日志总数：</strong> @LogStats["TodayLogs"]</p>
+                            <p><strong>内存日志数：</strong> @LogStats["MemoryLogs"]</p>
+                            <p><strong>今日唯一IP：</strong> @LogStats["TodayUniqueIPs"]</p>
+                            <p><strong>今日安全事件：</strong> @LogStats["TodaySecurityEvents"]</p>
+                            <p><strong>今日管理事件：</strong> @LogStats["TodayAdminEvents"]</p>
+                            <p><strong>日志文件大小：</strong> @LogStats["TodayLogFileSize"]</p>
                         </div>
                     </div>
                 </div>
@@ -218,11 +221,15 @@ else
                         <div class="action-group">
                             <h4>日志文件</h4>
                             <div class="log-files">
-                                @foreach (var date in AvailableLogDates.Take(10))
+                                @foreach (var fileInfo in LogFileInfo.Take(10))
                                 {
                                     <div class="log-file-item">
-                                        <span class="log-date">@date</span>
-                                        <button @onclick="() => ViewLogFile(date)" class="btn btn-sm btn-outline-primary">查看</button>
+                                        <div class="log-file-details">
+                                            <span class="log-date">@fileInfo.Date</span>
+                                            <span class="log-count">@fileInfo.Count 条</span>
+                                            <span class="log-size">@fileInfo.Size</span>
+                                        </div>
+                                        <button @onclick="() => ViewLogFile(fileInfo.Date)" class="btn btn-sm btn-outline-primary">查看</button>
                                     </div>
                                 }
                             </div>
@@ -569,9 +576,28 @@ else
         border-bottom: 1px solid #dee2e6;
     }
 
+    .log-file-details {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+    }
+
     .log-date {
         font-family: monospace;
         font-weight: 600;
+        min-width: 80px;
+    }
+
+    .log-count {
+        font-size: 0.9em;
+        color: #6c757d;
+        min-width: 60px;
+    }
+
+    .log-size {
+        font-size: 0.9em;
+        color: #6c757d;
+        min-width: 60px;
     }
 
     /* 按钮样式 */
@@ -651,8 +677,9 @@ else
     private List<LogEntry> FilteredLogs = new();
     private List<SecurityEvent> SecurityEvents = new();
     private Dictionary<string, object> SecurityStats = new();
-    private Dictionary<string, int> LogStats = new();
+    private Dictionary<string, object> LogStats = new();
     private List<string> AvailableLogDates = new();
+    private List<(string Date, int Count, string Size)> LogFileInfo = new();
     private DateTime StartTime = DateTime.Now;
     private string LogFilter = "ALL";
 
@@ -678,6 +705,7 @@ else
         SecurityStats = SecurityService.GetSecurityStats();
         LogStats = LoggingService.GetLogStats();
         AvailableLogDates = LoggingService.GetAvailableLogDates();
+        LogFileInfo = LoggingService.GetLogFileInfo();
 
         StateHasChanged();
     }
