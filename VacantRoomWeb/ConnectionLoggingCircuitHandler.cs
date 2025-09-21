@@ -9,6 +9,10 @@ namespace VacantRoomWeb
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly EnhancedLoggingService _logger;
 
+        // 用于跟踪每个IP的连接情况，避免重复记录
+        private static readonly Dictionary<string, DateTime> _lastLoggedConnection = new();
+        private static readonly object _logLock = new();
+
         public ConnectionLoggingCircuitHandler(
             ConnectionCounterService counter,
             ClientConnectionTracker ipTracker,
@@ -30,10 +34,29 @@ namespace VacantRoomWeb
 
             var count = _counter.Increment();
 
-            // 简化日志：只记录新的用户连接，不记录每个 SignalR 连接
-            if (count % 10 == 1 || count <= 5) // 仅在连接数变化较大时记录
+            // 智能记录：同一IP在30秒内的多次连接只记录一次
+            lock (_logLock)
             {
-                _logger.LogAccess(ip, "BLAZOR_CONNECTION_UP", $"Active connections: {count}", TruncateUserAgent(userAgent));
+                var now = DateTime.Now;
+                var shouldLog = false;
+
+                if (!_lastLoggedConnection.ContainsKey(ip))
+                {
+                    shouldLog = true;
+                }
+                else if (now.Subtract(_lastLoggedConnection[ip]).TotalSeconds > 30)
+                {
+                    shouldLog = true;
+                }
+
+                if (shouldLog)
+                {
+                    _lastLoggedConnection[ip] = now;
+                    _logger.LogAccess(ip, "BLAZOR_CONNECTION_UP", $"Active connections: {count}", TruncateUserAgent(userAgent));
+
+                    // 清理旧的记录（避免内存泄漏）
+                    CleanupOldConnections();
+                }
             }
 
             return Task.CompletedTask;
@@ -48,14 +71,48 @@ namespace VacantRoomWeb
                 _ipTracker.Remove(circuit.Id);
                 var count = _counter.Decrement();
 
-                // 简化日志：只记录重要的连接断开
-                if (count % 10 == 0 || count <= 5)
+                // 连接断开时也采用相同的策略，避免重复记录
+                lock (_logLock)
                 {
-                    _logger.LogAccess(ip, "BLAZOR_CONNECTION_DOWN", $"Active connections: {count}");
+                    var now = DateTime.Now;
+                    var shouldLog = false;
+
+                    if (_lastLoggedConnection.ContainsKey(ip))
+                    {
+                        if (now.Subtract(_lastLoggedConnection[ip]).TotalSeconds > 10) // 断开连接的间隔更短
+                        {
+                            shouldLog = true;
+                            _lastLoggedConnection[ip] = now;
+                        }
+                    }
+                    else
+                    {
+                        shouldLog = true;
+                        _lastLoggedConnection[ip] = now;
+                    }
+
+                    if (shouldLog)
+                    {
+                        _logger.LogAccess(ip, "BLAZOR_CONNECTION_DOWN", $"Active connections: {count}");
+                    }
                 }
             }
 
             return Task.CompletedTask;
+        }
+
+        private void CleanupOldConnections()
+        {
+            var cutoff = DateTime.Now.AddMinutes(-5);
+            var keysToRemove = _lastLoggedConnection
+                .Where(kvp => kvp.Value < cutoff)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in keysToRemove)
+            {
+                _lastLoggedConnection.Remove(key);
+            }
         }
 
         private string TruncateUserAgent(string userAgent)

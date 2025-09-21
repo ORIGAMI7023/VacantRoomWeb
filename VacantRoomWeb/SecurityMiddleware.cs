@@ -45,7 +45,7 @@
                 return;
             }
 
-            // 优化：只记录重要的访问，过滤掉静态资源和框架文件
+            // 进一步优化：只记录真正重要的页面访问
             if (ShouldLogRequest(requestPath))
             {
                 _logger.LogAccess(ip, "ACCESS", requestPath, userAgent);
@@ -56,7 +56,7 @@
 
         private bool ShouldLogRequest(string path)
         {
-            // 不记录静态资源和框架文件
+            // 不记录的路径
             var skipPatterns = new[]
             {
                 "/_framework/",
@@ -91,8 +91,19 @@
                 }
             }
 
-            // 只记录页面访问和重要的API调用
-            return true;
+            // 只记录主要页面访问，不记录 Blazor 内部路径
+            var importantPaths = new[]
+            {
+                "/",
+                "/admin",
+                "/admin/login",
+                "/admin/dashboard"
+            };
+
+            // 精确匹配重要路径，或者是根路径
+            return importantPaths.Any(important =>
+                path.Equals(important, StringComparison.OrdinalIgnoreCase) ||
+                path.Equals(important + "/", StringComparison.OrdinalIgnoreCase));
         }
     }
 }

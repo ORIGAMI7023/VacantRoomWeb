@@ -20,8 +20,8 @@
             // Allow localhost admin access in development
             if (host.Contains("localhost") && path.StartsWith("/admin"))
             {
-                // 只记录重要的本地管理访问，不记录静态资源
-                if (IsImportantAdminPath(path))
+                // 只记录关键的本地管理访问，避免重复
+                if (IsKeyAdminPath(path))
                 {
                     _logger.LogAccess(ip, "LOCALHOST_ADMIN_ACCESS", $"Host: {host}, Path: {path}");
                 }
@@ -35,7 +35,7 @@
                 // admin 根跳转到登录
                 if (path == "/" || string.IsNullOrEmpty(path))
                 {
-                    _logger.LogAccess(ip, "ADMIN_SUBDOMAIN_REDIRECT", $"Host: {host}, Redirecting to /admin/login");
+                    _logger.LogAccess(ip, "ADMIN_SUBDOMAIN_REDIRECT", $"Host: {host} -> /admin/login");
                     context.Response.Redirect("/admin/login");
                     return;
                 }
@@ -54,50 +54,30 @@
                     var newPath = "/admin" + path;
                     context.Request.Path = newPath;
 
-                    // 只记录路径重写，不记录普通访问
-                    if (IsImportantAdminPath(newPath))
+                    // 只记录重要的路径重写
+                    if (IsKeyAdminPath(newPath))
                     {
-                        _logger.LogAccess(ip, "ADMIN_PATH_REWRITE", $"Rewritten: {path} -> {newPath}");
+                        _logger.LogAccess(ip, "ADMIN_PATH_REWRITE", $"{path} -> {newPath}");
                     }
-                }
-                else if (IsImportantAdminPath(path))
-                {
-                    // 记录重要的admin子域访问
-                    _logger.LogAccess(ip, "ADMIN_SUBDOMAIN_ACCESS", $"Host: {host}, Path: {path}");
                 }
             }
 
             await _next(context);
         }
 
-        private bool IsImportantAdminPath(string path)
+        private bool IsKeyAdminPath(string path)
         {
-            // 只记录重要的管理路径，排除静态资源
-            var importantPaths = new[]
+            // 只记录真正关键的管理路径
+            var keyPaths = new[]
             {
-                "/admin/login",
-                "/admin/dashboard",
                 "/admin",
-                "/admin/"
+                "/admin/",
+                "/admin/login",
+                "/admin/dashboard"
             };
 
-            // 精确匹配重要路径
-            foreach (var importantPath in importantPaths)
-            {
-                if (path.Equals(importantPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            // 如果是 /admin 开头且不是静态资源，也记录
-            if (path.StartsWith("/admin", StringComparison.OrdinalIgnoreCase))
-            {
-                var staticExtensions = new[] { ".css", ".js", ".map", ".woff", ".woff2", ".ttf", ".eot", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico" };
-                return !staticExtensions.Any(ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
-            }
-
-            return false;
+            return keyPaths.Any(keyPath =>
+                path.Equals(keyPath, StringComparison.OrdinalIgnoreCase));
         }
     }
 }
