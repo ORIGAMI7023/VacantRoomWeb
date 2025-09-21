@@ -171,28 +171,19 @@ else
 
                         <div class="info-card">
                             <h4>安全状态</h4>
-                            <p><strong>活跃IP跟踪：</strong> @SecurityStats["ActiveIPTracking"]</p>
-                            <p><strong>面板锁定：</strong> @((bool)SecurityStats["AdminPanelLocked"] ? "是" : "否")</p>
+                            <p><strong>活跃IP跟踪：</strong> @SecurityStats.GetValueOrDefault("ActiveIPTracking", "未知")</p>
+                            <p><strong>面板锁定：</strong> @((bool)SecurityStats.GetValueOrDefault("AdminPanelLocked", false) ? "是" : "否")</p>
                             <p><strong>可用日志日期：</strong> @AvailableLogDates.Count 个</p>
                         </div>
 
                         <div class="info-card">
-                            <h4>日志统计（详细）</h4>
-                            <p><strong>今日日志总数：</strong> @LogStats["TodayLogs"]</p>
-                            <p><strong>内存日志数：</strong> @LogStats["MemoryLogs"]</p>
-                            <p><strong>今日唯一IP：</strong> @LogStats["TodayUniqueIPs"]</p>
-                            <p><strong>今日安全事件：</strong> @LogStats["TodaySecurityEvents"]</p>
-                            <p><strong>今日管理事件：</strong> @LogStats["TodayAdminEvents"]</p>
-                            <p><strong>日志文件大小：</strong> @LogStats["TodayLogFileSize"]</p>
-                        </div>
-
-                        <div class="info-card debug-card">
-                            <h4>调试信息</h4>
-                            <p><strong>调试信息：</strong> @LogStats["DebugInfo"]</p>
-                            <p><strong>文件行数：</strong> @LogStats["DebugFileLines"]</p>
-                            <p><strong>日志目录：</strong> @LogStats["DebugLogDirectory"]</p>
-                            <p><strong>当前时间：</strong> @LogStats["DebugCurrentTime"]</p>
-                            <p><strong>今日日期：</strong> @LogStats["DebugTodayDate"]</p>
+                            <h4>日志统计</h4>
+                            <p><strong>今日日志总数：</strong> @LogStats.GetValueOrDefault("TodayLogs", "未知")</p>
+                            <p><strong>内存日志数：</strong> @LogStats.GetValueOrDefault("MemoryLogs", "未知")</p>
+                            <p><strong>今日唯一IP：</strong> @LogStats.GetValueOrDefault("TodayUniqueIPs", "未知")</p>
+                            <p><strong>今日安全事件：</strong> @LogStats.GetValueOrDefault("TodaySecurityEvents", "未知")</p>
+                            <p><strong>今日管理事件：</strong> @LogStats.GetValueOrDefault("TodayAdminEvents", "未知")</p>
+                            <p><strong>日志文件大小：</strong> @LogStats.GetValueOrDefault("TodayLogFileSize", "未知")</p>
                         </div>
                     </div>
                 </div>
