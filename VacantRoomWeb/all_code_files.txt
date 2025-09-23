@@ -1,5 +1,5 @@
 ================================================================================
-打包时间: 2025年09月21日 16:58
+打包时间: 2025年09月23日 09:31
 VACANTROOM WEB PROJECT - ALL CODE FILES
 ================================================================================
 
@@ -126,10 +126,43 @@ namespace VacantRoomWeb
             var context = _httpContextAccessor.HttpContext;
             if (context == null) return;
 
-            context.Response.Cookies.Delete("AdminAuth");
+            var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
+
+            try
+            {
+                // 尝试通过 HttpContext 删除 Cookie
+                context.Response.Cookies.Delete("AdminAuth");
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
+            }
+            catch (InvalidOperationException)
+            {
+                // 响应已经开始，无法通过 HttpContext 删除 Cookie
+                // 这种情况下，我们依赖前端 JavaScript 来删除 Cookie
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie will be deleted via JavaScript");
+            }
+        }
+
+        // 新增：通过 JavaScript 删除 Cookie 的异步方法
+        public async Task SignOutAsync(IJSRuntime jsRuntime)
+        {
+            var context = _httpContextAccessor.HttpContext;
+            if (context == null) return;
 
             var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
-            _logger.LogAccess(ip, "ADMIN_LOGOUT");
+
+            try
+            {
+                // 首先尝试通过 HttpContext 删除
+                context.Response.Cookies.Delete("AdminAuth");
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
+            }
+            catch (InvalidOperationException)
+            {
+                // 如果 HttpContext 方式失败，使用 JavaScript 删除
+                await jsRuntime.InvokeVoidAsync("eval",
+                    "document.cookie = 'AdminAuth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; samesite=strict'");
+                _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via JavaScript");
+            }
         }
 
         private string CreateAuthToken(string username)
@@ -219,6 +252,75 @@ namespace VacantRoomWeb
         public bool ValidatePassword(string password, string storedHash, string salt)
         {
             return VerifyPassword(password, storedHash, salt);
+        }
+    }
+}
+
+
+============================================================
+FILE: ApplicationStartupService.cs
+============================================================
+﻿namespace VacantRoomWeb
+{
+    /// <summary>
+    /// 跟踪应用程序实际启动时间的服务
+    /// </summary>
+    public class ApplicationStartupService
+    {
+        // 使用静态字段，但通过静态构造函数确保在应用启动时初始化
+        private static readonly DateTime _applicationStartTime;
+
+        static ApplicationStartupService()
+        {
+            _applicationStartTime = DateTime.Now;
+        }
+
+        public DateTime GetApplicationStartTime()
+        {
+            return _applicationStartTime;
+        }
+
+        public string GetUptime()
+        {
+            var uptime = DateTime.Now - _applicationStartTime;
+            return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
+        }
+
+        public string GetDetailedUptime()
+        {
+            var uptime = DateTime.Now - _applicationStartTime;
+
+            if (uptime.TotalDays >= 1)
+            {
+                return $"{uptime.Days}天 {uptime.Hours}小时 {uptime.Minutes}分钟";
+            }
+            else if (uptime.TotalHours >= 1)
+            {
+                return $"{uptime.Hours}小时 {uptime.Minutes}分钟";
+            }
+            else
+            {
+                return $"{uptime.Minutes}分钟 {uptime.Seconds}秒";
+            }
+        }
+
+        /// <summary>
+        /// 获取应用程序启动相关信息
+        /// </summary>
+        public Dictionary<string, string> GetStartupInfo()
+        {
+            var uptime = DateTime.Now - _applicationStartTime;
+
+            return new Dictionary<string, string>
+            {
+                ["StartTime"] = _applicationStartTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                ["Uptime"] = GetDetailedUptime(),
+                ["TotalHours"] = uptime.TotalHours.ToString("F1"),
+                ["Environment"] = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "未知",
+                ["MachineName"] = Environment.MachineName,
+                ["ProcessorCount"] = Environment.ProcessorCount.ToString(),
+                ["WorkingSet"] = $"{Environment.WorkingSet / 1024 / 1024:F0} MB"
+            };
         }
     }
 }
@@ -363,6 +465,9 @@ FILE: Components\Pages\AdminDashboard.razor
 @inject ConnectionCounterService ConnectionService
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
+@inject ApplicationStartupService StartupService
+@inject IEmailService EmailService
+@inject IConfiguration Configuration
 
 <PageTitle>管理后台</PageTitle>
 
@@ -443,6 +548,9 @@ else
             <button @onclick="() => SetActiveTab(3)" class="tab-btn @(ActiveTab == 3 ? "active" : "")">
                 🗂️ 日志管理
             </button>
+            <button @onclick="() => SetActiveTab(4)" class="tab-btn @(ActiveTab == 4 ? "active" : "")">
+                📧 邮件管理
+            </button>
         </div>
 
         <!-- 标签页内容 -->
@@ -516,40 +624,39 @@ else
             {
                 <!-- 系统信息标签页 -->
                 <div class="system-section">
-                    <h3>系统信息</h3>
+                    <div class="section-header">
+                        <h3>系统信息</h3>
+                        <button @onclick="RefreshSystemInfo" class="btn btn-primary btn-sm">🔄 刷新</button>
+                    </div>
 
                     <div class="info-grid">
                         <div class="info-card">
                             <h4>服务器状态</h4>
-                            <p><strong>运行时间：</strong> @GetUptime()</p>
+                            <p><strong>启动时间：</strong> @StartupService.GetApplicationStartTime().ToString("yyyy-MM-dd HH:mm:ss")</p>
+                            <p><strong>运行时间：</strong> @StartupService.GetDetailedUptime()</p>
                             <p><strong>运行环境：</strong> @Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")</p>
                             <p><strong>服务器时间：</strong> @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</p>
+                            <p><strong>机器名称：</strong> @Environment.MachineName</p>
+                            <p><strong>内存使用：</strong> @($"{Environment.WorkingSet / 1024 / 1024:F0} MB")</p>
                         </div>
 
                         <div class="info-card">
                             <h4>安全状态</h4>
-                            <p><strong>活跃IP跟踪：</strong> @SecurityStats["ActiveIPTracking"]</p>
-                            <p><strong>面板锁定：</strong> @((bool)SecurityStats["AdminPanelLocked"] ? "是" : "否")</p>
+                            <p><strong>活跃IP跟踪：</strong> @SecurityStats.GetValueOrDefault("ActiveIPTracking", "未知")</p>
+                            <p><strong>面板锁定：</strong> @((bool)SecurityStats.GetValueOrDefault("AdminPanelLocked", false) ? "是" : "否")</p>
                             <p><strong>可用日志日期：</strong> @AvailableLogDates.Count 个</p>
+                            <p><strong>当前连接数：</strong> @CurrentConnections</p>
+                            <p><strong>已封禁IP：</strong> @SecurityStats.GetValueOrDefault("TotalBannedIPs", "0")</p>
                         </div>
 
                         <div class="info-card">
-                            <h4>日志统计（详细）</h4>
-                            <p><strong>今日日志总数：</strong> @LogStats["TodayLogs"]</p>
-                            <p><strong>内存日志数：</strong> @LogStats["MemoryLogs"]</p>
-                            <p><strong>今日唯一IP：</strong> @LogStats["TodayUniqueIPs"]</p>
-                            <p><strong>今日安全事件：</strong> @LogStats["TodaySecurityEvents"]</p>
-                            <p><strong>今日管理事件：</strong> @LogStats["TodayAdminEvents"]</p>
-                            <p><strong>日志文件大小：</strong> @LogStats["TodayLogFileSize"]</p>
-                        </div>
-
-                        <div class="info-card debug-card">
-                            <h4>调试信息</h4>
-                            <p><strong>调试信息：</strong> @LogStats["DebugInfo"]</p>
-                            <p><strong>文件行数：</strong> @LogStats["DebugFileLines"]</p>
-                            <p><strong>日志目录：</strong> @LogStats["DebugLogDirectory"]</p>
-                            <p><strong>当前时间：</strong> @LogStats["DebugCurrentTime"]</p>
-                            <p><strong>今日日期：</strong> @LogStats["DebugTodayDate"]</p>
+                            <h4>日志统计</h4>
+                            <p><strong>今日日志总数：</strong> @LogStats.GetValueOrDefault("TodayLogs", "未知")</p>
+                            <p><strong>内存日志数：</strong> @LogStats.GetValueOrDefault("MemoryLogs", "未知")</p>
+                            <p><strong>今日唯一IP：</strong> @LogStats.GetValueOrDefault("TodayUniqueIPs", "未知")</p>
+                            <p><strong>今日安全事件：</strong> @LogStats.GetValueOrDefault("TodaySecurityEvents", "未知")</p>
+                            <p><strong>今日管理事件：</strong> @LogStats.GetValueOrDefault("TodayAdminEvents", "未知")</p>
+                            <p><strong>日志文件大小：</strong> @LogStats.GetValueOrDefault("TodayLogFileSize", "未知")</p>
                         </div>
                     </div>
                 </div>
@@ -598,6 +705,135 @@ else
                                         <button @onclick="() => ViewLogFile(fileInfo.Date)" class="btn btn-sm btn-outline-primary">查看</button>
                                     </div>
                                 }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (ActiveTab == 4)
+            {
+                <!-- 邮件管理标签页 -->
+                <div class="email-management-section">
+                    <div class="section-header">
+                        <h3>邮件通知管理</h3>
+                        <button @onclick="RefreshEmailStatus" class="btn btn-primary btn-sm">🔄 刷新状态</button>
+                    </div>
+
+                    <div class="email-stats">
+                        <div class="stat-card">
+                            <div class="stat-icon">📧</div>
+                            <div class="stat-content">
+                                <h3>@EmailStats["TotalSent"]</h3>
+                                <p>邮件发送总数</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">✅</div>
+                            <div class="stat-content">
+                                <h3>@EmailStats["SuccessRate"]%</h3>
+                                <p>成功发送率</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">⏰</div>
+                            <div class="stat-content">
+                                <h3>@EmailStats["LastSent"]</h3>
+                                <p>最后发送时间</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="email-actions">
+                        <div class="action-group">
+                            <h4>邮件服务测试</h4>
+                            <div class="test-controls">
+                                <button @onclick="TestEmailService"
+                                        disabled="@IsEmailTesting"
+                                        class="btn btn-primary">
+                                    @if (IsEmailTesting)
+                                    {
+                                        <span>⏳ 测试中...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>📧 发送测试邮件</span>
+                                    }
+                                </button>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(EmailTestResult))
+                            {
+                                <div class="test-result @(EmailTestSuccess ? "success" : "error")">
+                                    @EmailTestResult
+                                </div>
+                            }
+                        </div>
+
+                        <div class="action-group">
+                            <h4>邮件配置</h4>
+                            <div class="config-display">
+                                <p><strong>API地址：</strong> @EmailConfig["ApiUrl"]</p>
+                                <p><strong>收件人：</strong> @EmailConfig["Recipient"]</p>
+                                <p><strong>冷却时间：</strong> @EmailConfig["Cooldown"] 分钟</p>
+                                <p>
+                                    <strong>服务状态：</strong>
+                                    <span class="@(EmailConfig["ServiceStatus"] == "正常" ? "status-ok" : "status-error")">
+                                        @EmailConfig["ServiceStatus"]
+                                    </span>
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="action-group">
+                            <h4>安全警报设置</h4>
+                            <div class="alert-settings">
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableDDoSAlerts" />
+                                        DDoS攻击警报
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableBruteForceAlerts" />
+                                        暴力破解警报
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableSystemLockdownAlerts" />
+                                        系统锁定警报
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableIPBanAlerts" />
+                                        IP封禁警报
+                                    </label>
+                                </div>
+
+                                <button @onclick="SaveEmailSettings" class="btn btn-success btn-sm">💾 保存设置</button>
+                            </div>
+                        </div>
+
+                        <div class="action-group">
+                            <h4>手动发送通知</h4>
+                            <div class="manual-send">
+                                <div class="form-group">
+                                    <label>主题：</label>
+                                    <input @bind="ManualEmailSubject" class="form-control" placeholder="输入邮件主题" />
+                                </div>
+                                <div class="form-group">
+                                    <label>内容：</label>
+                                    <textarea @bind="ManualEmailContent" class="form-control" rows="4" placeholder="输入邮件内容"></textarea>
+                                </div>
+                                <button @onclick="SendManualEmail"
+                                        disabled="@(string.IsNullOrEmpty(ManualEmailSubject) || IsEmailTesting)"
+                                        class="btn btn-info">
+                                    📤 发送通知邮件
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -898,21 +1134,6 @@ else
             color: #333;
         }
 
-    .debug-card {
-        background: #ffe6e6;
-        border: 1px solid #ffcccc;
-    }
-
-        .debug-card h4 {
-            color: #cc0000;
-        }
-
-        .debug-card p {
-            font-family: monospace;
-            font-size: 0.85em;
-            word-break: break-all;
-        }
-
     /* 日志管理样式 */
     .management-actions {
         display: grid;
@@ -981,6 +1202,146 @@ else
         min-width: 60px;
     }
 
+    /* 邮件管理样式 */
+    .email-management-section {
+        padding: 20px;
+    }
+
+    .email-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 30px;
+    }
+
+    .email-actions {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+    }
+
+    .action-group {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+    }
+
+        .action-group h4 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+    .test-controls {
+        margin: 15px 0;
+    }
+
+    .test-result {
+        margin-top: 15px;
+        padding: 10px;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+
+        .test-result.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .test-result.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+    .config-display {
+        background: white;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+    }
+
+        .config-display p {
+            margin: 8px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+    .status-ok {
+        color: #28a745;
+        font-weight: bold;
+    }
+
+    .status-error {
+        color: #dc3545;
+        font-weight: bold;
+    }
+
+    .alert-settings {
+        background: white;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+    }
+
+    .setting-item {
+        margin: 10px 0;
+        display: flex;
+        align-items: center;
+    }
+
+        .setting-item label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .setting-item input[type="checkbox"] {
+            margin-right: 8px;
+            transform: scale(1.2);
+        }
+
+    .manual-send {
+        background: white;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+    }
+
+    .form-group {
+        margin-bottom: 15px;
+    }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+        }
+
+    .form-control {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+
+    textarea.form-control {
+        resize: vertical;
+        min-height: 80px;
+    }
+
     /* 按钮样式 */
     .btn {
         padding: 8px 16px;
@@ -1024,9 +1385,25 @@ else
         border: 1px solid #6c757d;
     }
 
+    .btn-success {
+        background: #28a745;
+        color: white;
+        border: 1px solid #28a745;
+    }
+
+        .btn-success:hover:not(:disabled) {
+            background: #218838;
+            border-color: #1e7e34;
+        }
+
     .btn-sm {
         padding: 5px 10px;
         font-size: 0.875rem;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
     }
 
     /* 警告框样式 */
@@ -1042,13 +1419,22 @@ else
         color: #856404;
     }
 
-    .form-control {
-        padding: 8px 12px;
-        border: 1px solid #ced4da;
-        border-radius: 4px;
-        background-color: white;
+
+    {
+        grid-template-columns: 1fr;
+    }
+
+    .email-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .action-group {
+        padding: 15px;
+    }
+
     }
 </style>
+
 
 @code {
     private bool IsAuthenticated = false;
@@ -1065,6 +1451,16 @@ else
     private string LogFilter = "ALL";
     private Timer? _refreshTimer;
 
+    // 邮件管理相关变量
+    private Dictionary<string, object> EmailStats = new();
+    private Dictionary<string, string> EmailConfig = new();
+    private EmailNotificationSettings EmailSettings = new();
+    private bool IsEmailTesting = false;
+    private string EmailTestResult = "";
+    private bool EmailTestSuccess = false;
+    private string ManualEmailSubject = "";
+    private string ManualEmailContent = "";
+
     protected override async Task OnInitializedAsync()
     {
         IsAuthenticated = AuthService.IsAuthenticated();
@@ -1076,6 +1472,7 @@ else
         }
 
         await LoadDashboardData();
+        await LoadEmailData();
 
         // 设置定时刷新 - 每30秒自动刷新统计数据
         _refreshTimer = new Timer(async _ =>
@@ -1085,6 +1482,7 @@ else
                 LogStats = LoggingService.GetLogStats();
                 SecurityStats = SecurityService.GetSecurityStats();
                 CurrentConnections = ConnectionService.GetCount();
+                await LoadEmailData();
                 StateHasChanged();
             });
         }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
@@ -1107,6 +1505,153 @@ else
         LogFileInfo = LoggingService.GetLogFileInfo();
 
         StateHasChanged();
+    }
+
+    // 加载邮件相关数据
+    private async Task LoadEmailData()
+    {
+        EmailStats = GetEmailStats();
+        EmailConfig = GetEmailConfig();
+        EmailSettings = GetEmailSettings();
+    }
+
+    // 获取邮件统计信息
+    private Dictionary<string, object> GetEmailStats()
+    {
+        var recentLogs = LoggingService.GetRecentLogs(1000);
+        var emailLogs = recentLogs.Where(l => l.Action.Contains("EMAIL") || l.Action.Contains("ALERT")).ToList();
+
+        var totalSent = emailLogs.Count;
+        var successCount = emailLogs.Count(l => !l.Details.Contains("失败") && !l.Details.Contains("error"));
+        var successRate = totalSent > 0 ? (successCount * 100 / totalSent) : 100;
+
+        var lastSent = emailLogs.OrderByDescending(l => l.Timestamp).FirstOrDefault()?.Timestamp.ToString("MM-dd HH:mm") ?? "未发送";
+
+        return new Dictionary<string, object>
+        {
+            ["TotalSent"] = totalSent,
+            ["SuccessRate"] = successRate,
+            ["LastSent"] = lastSent
+        };
+    }
+
+    // 获取邮件配置信息
+    private Dictionary<string, string> GetEmailConfig()
+    {
+        var apiUrl = Configuration["Email:NotifyHubAPI:BaseUrl"] ?? "未配置";
+        var recipient = Configuration["Email:DefaultRecipient"] ?? "未配置";
+
+        return new Dictionary<string, string>
+        {
+            ["ApiUrl"] = apiUrl,
+            ["Recipient"] = recipient,
+            ["Cooldown"] = "5",
+            ["ServiceStatus"] = "正常"
+        };
+    }
+
+    // 获取邮件通知设置
+    private EmailNotificationSettings GetEmailSettings()
+    {
+        return new EmailNotificationSettings
+        {
+            EnableDDoSAlerts = true,
+            EnableBruteForceAlerts = true,
+            EnableSystemLockdownAlerts = true,
+            EnableIPBanAlerts = true
+        };
+    }
+
+    // 测试邮件服务
+    private async Task TestEmailService()
+    {
+        IsEmailTesting = true;
+        EmailTestResult = "";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.TestEmailServiceAsync();
+
+            if (success)
+            {
+                EmailTestResult = "✅ 邮件服务测试成功！测试邮件已发送到 " + (Configuration["Email:DefaultRecipient"] ?? "未知邮箱");
+                EmailTestSuccess = true;
+            }
+            else
+            {
+                EmailTestResult = "❌ 邮件服务测试失败，请检查配置和网络连接";
+                EmailTestSuccess = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            EmailTestResult = $"❌ 邮件服务测试异常：{ex.Message}";
+            EmailTestSuccess = false;
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    // 刷新邮件状态
+    private async Task RefreshEmailStatus()
+    {
+        await LoadEmailData();
+        StateHasChanged();
+    }
+
+    // 保存邮件设置
+    private async Task SaveEmailSettings()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "邮件设置已保存");
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"保存失败：{ex.Message}");
+        }
+    }
+
+    // 发送手动邮件
+    private async Task SendManualEmail()
+    {
+        if (string.IsNullOrEmpty(ManualEmailSubject) || string.IsNullOrEmpty(ManualEmailContent))
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "请填写邮件主题和内容");
+            return;
+        }
+
+        IsEmailTesting = true;
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSystemNotificationAsync(ManualEmailSubject, ManualEmailContent);
+
+            if (success)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "邮件发送成功！");
+                ManualEmailSubject = "";
+                ManualEmailContent = "";
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "邮件发送失败，请检查配置");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"邮件发送异常：{ex.Message}");
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
     }
 
     private void SetActiveTab(int tabIndex)
@@ -1152,13 +1697,11 @@ else
     private async Task ExportLogs()
     {
         var today = DateTime.Now.ToString("yyyy-MM-dd");
-        // 实际实现可以生成下载文件
         await JSRuntime.InvokeVoidAsync("alert", $"导出功能开发中，将导出 {today} 的日志文件");
     }
 
     private async Task ViewLogFile(string date)
     {
-        // 实际实现可以显示特定日期的日志
         await JSRuntime.InvokeVoidAsync("alert", $"查看功能开发中，将显示 {date} 的日志内容");
     }
 
@@ -1177,8 +1720,16 @@ else
 
     private async Task HandleLogout()
     {
-        AuthService.SignOut();
-        await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
+        try
+        {
+            await AuthService.SignOutAsync(JSRuntime);
+            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("console.error", $"Logout error: {ex.Message}");
+            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
+        }
     }
 
     private string GetLogRowClass(string action)
@@ -1235,8 +1786,17 @@ else
             "QUERY_ROOM_USAGE" => "查询教室使用情况",
             "QUERY_RESULT" => "查询结果",
             "ERROR_FILE_NOT_FOUND" => "文件未找到错误",
-            _ => action // 如果没有匹配的，返回原始值
+            _ => action
         };
+    }
+
+    private async Task RefreshSystemInfo()
+    {
+        LogStats = LoggingService.GetLogStats();
+        SecurityStats = SecurityService.GetSecurityStats();
+        CurrentConnections = ConnectionService.GetCount();
+        AvailableLogDates = LoggingService.GetAvailableLogDates();
+        StateHasChanged();
     }
 }
 
@@ -1251,35 +1811,20 @@ FILE: Components\Pages\AdminLogin.razor
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 
-<PageTitle>Admin Login - Debug</PageTitle>
+<PageTitle>Admin Login</PageTitle>
 
 <div style="max-width: 400px; margin: 50px auto; padding: 20px; border: 1px solid #ccc;">
-    <h2>Admin Login - Debug Mode</h2>
-
-    <p>当前时间: @DateTime.Now.ToString("HH:mm:ss")</p>
-    <p>计数器: @counter</p>
-
-    <button @onclick="IncrementCounter" style="padding: 10px; margin: 5px; background: #007bff; color: white; border: none;">
-        点击测试 (@counter)
-    </button>
-
-    <hr />
+    <h2>Admin Login</h2>
 
     <div style="margin-bottom: 15px;">
         <label>Username:</label><br />
         <input @bind="Username" @oninput="OnUsernameInput" type="text" style="width: 100%; padding: 8px;" />
-        <small>输入的值: @Username</small>
     </div>
 
     <div style="margin-bottom: 15px;">
         <label>Password:</label><br />
         <input @bind="Password" @oninput="OnPasswordInput" type="password" style="width: 100%; padding: 8px;" />
-        <small>密码长度: @(Password?.Length ?? 0)</small>
     </div>
-
-    <button @onclick="SimpleTest" style="width: 100%; padding: 10px; background: #28a745; color: white; border: none; margin: 5px 0;">
-        测试配置
-    </button>
 
     <button @onclick="LoginTest" style="width: 100%; padding: 10px; background: #dc3545; color: white; border: none; margin: 5px 0;">
         登录
@@ -1353,93 +1898,36 @@ FILE: Components\Pages\AdminLogin.razor
 </style>
 
 @code {
-    private int counter = 0;
     private string Username = "";
     private string Password = "";
-    private string Message = "页面已加载，等待测试...";
+    private string Message = "";
 
     protected override async Task OnInitializedAsync()
     {
-        Message = $"页面初始化完成: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
-
-        // Check if admin panel is locked
+        // 检查管理面板锁定状态
         if (SecurityService.IsAdminPanelLocked())
         {
-            Message += "\n⚠️ 管理面板已锁定";
+            Message = "⚠️ 管理面板已锁定";
             return;
         }
 
-        // If already authenticated, redirect to dashboard
+        // 如果已认证，跳转到仪表板
         if (AuthService.IsAuthenticated())
         {
-            Message += "\n✅ 已认证，准备跳转...";
-            await Task.Delay(100); // 短暂延迟确保组件完全加载
+            await Task.Delay(100);
             Navigation.NavigateTo("/admin", true);
         }
-    }
-
-    private void IncrementCounter()
-    {
-        counter++;
-        Message += $"\n计数器点击: {counter} - {DateTime.Now:HH:mm:ss}";
-        StateHasChanged();
     }
 
     private void OnUsernameInput(ChangeEventArgs e)
     {
         Username = e.Value?.ToString() ?? "";
-        Message += $"\n用户名输入: '{Username}'";
         StateHasChanged();
     }
 
     private void OnPasswordInput(ChangeEventArgs e)
     {
         Password = e.Value?.ToString() ?? "";
-        Message += $"\n密码输入长度: {Password.Length}";
-        StateHasChanged();
-    }
-
-    private void SimpleTest()
-    {
-        Message += $"\n=== 配置测试开始 ===";
-        Message += $"\n时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
-
-        try
-        {
-            Message += $"\n正在获取 AdminConfig...";
-            var adminConfig = AuthService.GetAdminConfig();
-
-            if (adminConfig == null)
-            {
-                Message += $"\n❌ AdminConfig 为 null";
-                Message += $"\n检查 appsettings.json 是否包含 AdminConfig 节点";
-            }
-            else
-            {
-                Message += $"\n✅ AdminConfig 已加载";
-                Message += $"\nUsername: '{adminConfig.Username}'";
-                Message += $"\nPasswordHash 长度: {adminConfig.PasswordHash?.Length ?? 0}";
-                Message += $"\nSalt 长度: {adminConfig.Salt?.Length ?? 0}";
-
-                if (!string.IsNullOrEmpty(adminConfig.PasswordHash) && !string.IsNullOrEmpty(adminConfig.Salt))
-                {
-                    Message += $"\n正在测试密码验证...";
-                    var testResult = AuthService.ValidatePassword("K9mP#3xR8qW$7nZ5", adminConfig.PasswordHash, adminConfig.Salt);
-                    Message += $"\n测试密码验证: {(testResult ? "✅ 成功" : "❌ 失败")}";
-                }
-                else
-                {
-                    Message += $"\n❌ 密码哈希或盐值为空";
-                }
-            }
-
-            Message += $"\n测试完成: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
-        }
-        catch (Exception ex)
-        {
-            Message += $"\n❌ 测试异常: {ex.Message}";
-        }
-
         StateHasChanged();
     }
 
@@ -1447,65 +1935,493 @@ FILE: Components\Pages\AdminLogin.razor
     {
         if (SecurityService.IsAdminPanelLocked())
         {
-            Message += $"\n❌ 管理面板已锁定";
+            Message = "⚠️ 管理面板已锁定";
             StateHasChanged();
             return;
         }
 
-        Message += $"\n=== 登录测试开始 ===";
-        Message += $"\n登录开始: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
-        Message += $"\n输入用户名: '{Username}'";
-        Message += $"\n输入密码长度: {Password?.Length ?? 0}";
+        if (string.IsNullOrEmpty(Username) || string.IsNullOrEmpty(Password))
+        {
+            Message = "请输入用户名和密码";
+            StateHasChanged();
+            return;
+        }
 
         try
         {
-            if (string.IsNullOrEmpty(Username) || string.IsNullOrEmpty(Password))
-            {
-                Message += $"\n❌ 用户名或密码为空";
-                StateHasChanged();
-                return;
-            }
-
             var result = AuthService.ValidateCredentials(Username, Password);
-            Message += $"\n验证结果: {(result ? "✅ 成功" : "❌ 失败")}";
 
             if (result)
             {
-                Message += $"\n设置认证 Cookie...";
-
-                // 尝试使用 JavaScript 设置 Cookie
                 try
                 {
                     await AuthService.SetAuthCookieAsync(Username, JSRuntime);
-                    Message += $"\n✅ Cookie 设置成功";
+                    Navigation.NavigateTo("/admin", forceLoad: true);
                 }
                 catch (Exception cookieEx)
                 {
-                    Message += $"\n❌ Cookie 设置失败: {cookieEx.Message}";
+                    Message = $"Cookie设置失败: {cookieEx.Message}";
                     StateHasChanged();
                     return;
                 }
-
-                Message += $"\n准备跳转到 /admin";
-                StateHasChanged();
-
-                await Task.Delay(1000); // 让用户看到成功信息
-
-                Navigation.NavigateTo("/admin", forceLoad: true);
             }
             else
             {
-                Message += $"\n登录失败，清空密码";
+                Message = "登录失败";
                 Password = "";
             }
         }
         catch (Exception ex)
         {
-            Message += $"\n❌ 登录异常: {ex.Message}";
+            Message = $"登录异常: {ex.Message}";
         }
 
-        Message += $"\n=== 登录测试结束 ===";
         StateHasChanged();
+    }
+}
+
+
+============================================================
+FILE: Components\Pages\EmailTest.razor
+============================================================
+﻿@page "/admin/email-test"
+@rendermode InteractiveServer
+@inject IEmailService EmailService
+@inject AdminAuthService AuthService
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<PageTitle>邮件服务测试</PageTitle>
+
+@if (!IsAuthenticated)
+{
+    <div class="loading-container">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">加载中...</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="email-test-container">
+        <div class="test-header">
+            <h2>📧 邮件服务测试</h2>
+            <p>测试 VacantRoomWeb 邮件通知系统是否正常工作</p>
+        </div>
+
+        <div class="test-section">
+            <h3>基础邮件测试</h3>
+            <div class="test-card">
+                <div class="test-description">
+                    <h4>服务连通性测试</h4>
+                    <p>测试与 NotifyHubAPI 的连接是否正常，发送一封测试邮件到默认收件人。</p>
+                </div>
+                <div class="test-action">
+                    <button @onclick="RunBasicTest"
+                            disabled="@IsTesting"
+                            class="btn btn-primary">
+                        @if (IsTesting && CurrentTest == "basic")
+                        {
+                            <span>🔄 测试中...</span>
+                        }
+                        else
+                        {
+                            <span>🧪 运行基础测试</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>安全警报测试</h3>
+            <div class="test-card">
+                <div class="test-description">
+                    <h4>安全警报邮件</h4>
+                    <p>模拟安全事件，测试安全警报邮件的发送功能。</p>
+                </div>
+                <div class="test-action">
+                    <button @onclick="RunSecurityTest"
+                            disabled="@IsTesting"
+                            class="btn btn-warning">
+                        @if (IsTesting && CurrentTest == "security")
+                        {
+                            <span>🔄 测试中...</span>
+                        }
+                        else
+                        {
+                            <span>⚠️ 测试安全警报</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>系统通知测试</h3>
+            <div class="test-card">
+                <div class="test-description">
+                    <h4>系统通知邮件</h4>
+                    <p>测试系统通知邮件的发送功能。</p>
+                </div>
+                <div class="test-action">
+                    <button @onclick="RunSystemNotificationTest"
+                            disabled="@IsTesting"
+                            class="btn btn-info">
+                        @if (IsTesting && CurrentTest == "notification")
+                        {
+                            <span>🔄 测试中...</span>
+                        }
+                        else
+                        {
+                            <span>📢 测试系统通知</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        @if (TestResults.Any())
+        {
+            <div class="results-section">
+                <h3>测试结果</h3>
+                <div class="results-container">
+                    @foreach (var result in TestResults.OrderByDescending(r => r.Timestamp))
+                    {
+                        <div class="result-item @(result.Success ? "success" : "error")">
+                            <div class="result-header">
+                                <span class="result-type">@result.TestType</span>
+                                <span class="result-time">@result.Timestamp.ToString("HH:mm:ss")</span>
+                                <span class="result-status">@(result.Success ? "✅ 成功" : "❌ 失败")</span>
+                            </div>
+                            <div class="result-message">
+                                @result.Message
+                            </div>
+                            @if (!string.IsNullOrEmpty(result.Details))
+                            {
+                                <div class="result-details">
+                                    <strong>详细信息：</strong> @result.Details
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <div class="actions-section">
+            <button @onclick="ClearResults" class="btn btn-secondary">🗑️ 清空结果</button>
+            <button @onclick="GoBack" class="btn btn-outline-secondary">← 返回管理后台</button>
+        </div>
+    </div>
+}
+
+<style>
+    .email-test-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .test-header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 10px;
+    }
+
+    .test-section {
+        margin-bottom: 25px;
+    }
+
+        .test-section h3 {
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+    .test-card {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+    }
+
+    .test-description {
+        flex: 1;
+    }
+
+        .test-description h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .test-description p {
+            margin: 0;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+
+    .test-action {
+        flex-shrink: 0;
+    }
+
+    .results-section {
+        margin-top: 30px;
+    }
+
+    .results-container {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+
+    .result-item {
+        margin-bottom: 15px;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid;
+    }
+
+        .result-item.success {
+            background-color: #d4edda;
+            border-left-color: #28a745;
+        }
+
+        .result-item.error {
+            background-color: #f8d7da;
+            border-left-color: #dc3545;
+        }
+
+    .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        font-weight: 600;
+    }
+
+    .result-message {
+        margin-bottom: 5px;
+        font-size: 0.95em;
+    }
+
+    .result-details {
+        font-size: 0.85em;
+        color: #6c757d;
+        font-family: monospace;
+    }
+
+    .actions-section {
+        margin-top: 30px;
+        text-align: center;
+        display: flex;
+        gap: 15px;
+        justify-content: center;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: 500;
+        text-decoration: none;
+        display: inline-block;
+        text-align: center;
+    }
+
+    .btn-primary {
+        background: #667eea;
+        color: white;
+    }
+
+    .btn-warning {
+        background: #ffc107;
+        color: #212529;
+    }
+
+    .btn-info {
+        background: #17a2b8;
+        color: white;
+    }
+
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+
+    .btn-outline-secondary {
+        background: transparent;
+        color: #6c757d;
+        border: 1px solid #6c757d;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn:hover:not(:disabled) {
+        opacity: 0.9;
+        transform: translateY(-1px);
+    }
+
+    {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .actions-section {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    }
+</style>
+
+@code {
+    private bool IsAuthenticated = false;
+    private bool IsTesting = false;
+    private string CurrentTest = "";
+    private List<TestResult> TestResults = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        IsAuthenticated = AuthService.IsAuthenticated();
+
+        if (!IsAuthenticated)
+        {
+            Navigation.NavigateTo("/admin/login");
+            return;
+        }
+    }
+
+    private async Task RunBasicTest()
+    {
+        IsTesting = true;
+        CurrentTest = "basic";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.TestEmailServiceAsync();
+
+            AddTestResult("基础连通性测试", success,
+                success ? "邮件服务连接正常，测试邮件发送成功" : "邮件服务连接失败或发送失败",
+                success ? "API连接正常，邮件已发送到默认收件人" : "请检查API配置和网络连接");
+        }
+        catch (Exception ex)
+        {
+            AddTestResult("基础连通性测试", false, "测试过程中发生异常", ex.Message);
+        }
+        finally
+        {
+            IsTesting = false;
+            CurrentTest = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunSecurityTest()
+    {
+        IsTesting = true;
+        CurrentTest = "security";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSecurityAlertAsync(
+                "测试安全警报",
+                "这是一个测试安全警报，用于验证安全邮件通知功能是否正常工作。",
+                "192.168.1.100");
+
+            AddTestResult("安全警报测试", success,
+                success ? "安全警报邮件发送成功" : "安全警报邮件发送失败",
+                success ? "安全警报邮件已发送，包含完整的安全事件信息" : "请检查邮件服务配置");
+        }
+        catch (Exception ex)
+        {
+            AddTestResult("安全警报测试", false, "测试过程中发生异常", ex.Message);
+        }
+        finally
+        {
+            IsTesting = false;
+            CurrentTest = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunSystemNotificationTest()
+    {
+        IsTesting = true;
+        CurrentTest = "notification";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSystemNotificationAsync(
+                "系统通知测试",
+                "这是一个系统通知测试邮件，用于验证系统通知功能是否正常工作。系统当前运行正常，所有服务都在线。");
+
+            AddTestResult("系统通知测试", success,
+                success ? "系统通知邮件发送成功" : "系统通知邮件发送失败",
+                success ? "系统通知邮件已发送，格式正确" : "请检查邮件服务配置");
+        }
+        catch (Exception ex)
+        {
+            AddTestResult("系统通知测试", false, "测试过程中发生异常", ex.Message);
+        }
+        finally
+        {
+            IsTesting = false;
+            CurrentTest = "";
+            StateHasChanged();
+        }
+    }
+
+    private void AddTestResult(string testType, bool success, string message, string details = "")
+    {
+        TestResults.Add(new TestResult
+        {
+            TestType = testType,
+            Success = success,
+            Message = message,
+            Details = details,
+            Timestamp = DateTime.Now
+        });
+
+        // 只保留最近10个测试结果
+        if (TestResults.Count > 10)
+        {
+            TestResults = TestResults.OrderByDescending(r => r.Timestamp).Take(10).ToList();
+        }
+    }
+
+    private void ClearResults()
+    {
+        TestResults.Clear();
+        StateHasChanged();
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/admin");
+    }
+
+    public class TestResult
+    {
+        public string TestType { get; set; } = "";
+        public bool Success { get; set; }
+        public string Message { get; set; } = "";
+        public string Details { get; set; } = "";
+        public DateTime Timestamp { get; set; }
     }
 }
 
@@ -2205,6 +3121,22 @@ FILE: DomainRoutingMiddleware.cs
 
 
 ============================================================
+FILE: EmailNotificationSettings.cs
+============================================================
+﻿// EmailNotificationSettings.cs
+namespace VacantRoomWeb
+{
+    public class EmailNotificationSettings
+    {
+        public bool EnableDDoSAlerts { get; set; }
+        public bool EnableBruteForceAlerts { get; set; }
+        public bool EnableSystemLockdownAlerts { get; set; }
+        public bool EnableIPBanAlerts { get; set; }
+    }
+}
+
+
+============================================================
 FILE: EnhancedLoggingService.cs
 ============================================================
 ﻿using System.Collections.Concurrent;
@@ -2629,6 +3561,9 @@ builder.Services.AddSignalR(options =>
     options.EnableDetailedErrors = true;
 });
 
+// Register HttpClient for EmailService
+builder.Services.AddHttpClient<IEmailService, EmailService>();
+
 // Register existing services
 builder.Services.AddSingleton<ConnectionCounterService>();
 builder.Services.AddSingleton<ClientConnectionTracker>();
@@ -2636,9 +3571,9 @@ builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 // Register new security and logging services
 builder.Services.AddSingleton<EnhancedLoggingService>();
-builder.Services.AddSingleton<IEmailService, EmailService>();
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<AdminAuthService>();
+builder.Services.AddSingleton<ApplicationStartupService>();
 
 // Register notification service for component communication
 builder.Services.AddSingleton<NotificationService>();
@@ -2790,7 +3725,8 @@ FILE: SecurityMiddleware.cs
 ============================================================
 FILE: SecurityService.cs
 ============================================================
-﻿using System.Collections.Concurrent;
+﻿// SecurityService.cs - 更新部分
+using System.Collections.Concurrent;
 
 namespace VacantRoomWeb
 {
@@ -2878,7 +3814,12 @@ namespace VacantRoomWeb
                     BanIP(ip, TimeSpan.FromMinutes(15), "DDoS_DETECTED"); // 减少到15分钟
                     _logger.LogAccess(ip, "SECURITY_DDOS_DETECTED", $"Requests in 1min: {requestCount}", userAgent);
 
-                    TriggerEmailAlert("DDoS Attack Detected", $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.");
+                    // 异步发送邮件警报
+                    _ = Task.Run(async () =>
+                    {
+                        await TriggerEmailAlertAsync("DDoS Attack Detected",
+                            $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.", ip);
+                    });
 
                     return false;
                 }
@@ -2929,7 +3870,12 @@ namespace VacantRoomWeb
                     _recentBreachAttempts.RemoveAll(time => time < tenMinutesAgo);
                     _recentBreachAttempts.Add(now);
 
-                    TriggerEmailAlert("Brute Force Attack Detected", $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.");
+                    // 异步发送邮件警报
+                    _ = Task.Run(async () =>
+                    {
+                        await TriggerEmailAlertAsync("Brute Force Attack Detected",
+                            $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.", ip);
+                    });
 
                     // 系统锁定：10分钟内5个不同IP的暴力破解
                     var recentUniqueAttackers = _loginAttempts
@@ -2941,8 +3887,12 @@ namespace VacantRoomWeb
                         _adminPanelLockdownUntil = now.AddMinutes(15); // 减少到15分钟
                         _logger.LogAccess(ip, "SECURITY_ADMIN_LOCKDOWN", $"Admin panel locked for 15 minutes due to {recentUniqueAttackers} attackers", userAgent);
 
-                        TriggerEmailAlert("CRITICAL: Admin Panel Locked",
-                            $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}");
+                        // 异步发送系统锁定警报
+                        _ = Task.Run(async () =>
+                        {
+                            await TriggerEmailAlertAsync("CRITICAL: Admin Panel Locked",
+                                $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}", ip);
+                        });
                     }
 
                     return false;
@@ -2967,6 +3917,28 @@ namespace VacantRoomWeb
             _logger.LogAccess(ip, "SECURITY_IP_BANNED", $"Reason: {reason}, Duration: {duration.TotalMinutes} minutes");
         }
 
+        // 更新为异步邮件警报方法
+        private async Task TriggerEmailAlertAsync(string subject, string message, string ipAddress = null)
+        {
+            var now = DateTime.Now;
+
+            // Rate limit emails: max 1 every 15 minutes
+            if (now.Subtract(_lastEmailSent).TotalMinutes >= 15)
+            {
+                _lastEmailSent = now;
+
+                try
+                {
+                    await _emailService.SendSecurityAlertAsync(subject, message, ipAddress);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogAccess("SYSTEM", "EMAIL_ALERT_FAILED", $"Failed to send email: {ex.Message}");
+                }
+            }
+        }
+
+        // 保持原有同步方法以保证兼容性
         private void TriggerEmailAlert(string subject, string message)
         {
             var now = DateTime.Now;
@@ -3009,7 +3981,7 @@ namespace VacantRoomWeb
                 {
                     ["TotalBannedIPs"] = _bannedIPs.Count(kvp => kvp.Value > now),
                     ["AdminPanelLocked"] = IsAdminPanelLocked(),
-                    ["LockdownUntil"] = _adminPanelLockdownUntil?.ToString("yyyy-MM-dd HH:mm:ss"),
+                    ["LockdownUntil"] = _adminPanelLockdownUntil?.ToString("yyyy-MM-dd HH:mm:ss") ?? "未锁定",
                     ["RecentBreachAttempts"] = _recentBreachAttempts.Count(t => t > oneDayAgo),
                     ["ActiveIPTracking"] = _ipRequests.Count
                 };
@@ -3046,31 +4018,6 @@ namespace VacantRoomWeb
             {
                 _bannedIPs.TryRemove(ip, out _);
             }
-        }
-    }
-
-    // Email service interface (placeholder for future implementation)
-    public interface IEmailService
-    {
-        void SendSecurityAlert(string subject, string message);
-    }
-
-    public class EmailService : IEmailService
-    {
-        private readonly EnhancedLoggingService _logger;
-
-        public EmailService(EnhancedLoggingService logger)
-        {
-            _logger = logger;
-        }
-
-        public void SendSecurityAlert(string subject, string message)
-        {
-            // Placeholder implementation - log the email attempt
-            _logger.LogAccess("SYSTEM", "EMAIL_ALERT_TRIGGERED", $"Subject: {subject}, Message: {message}");
-
-            // TODO: Implement actual email sending using SMTP
-            // This will be implemented in the next phase
         }
     }
 }
@@ -3589,14 +4536,12 @@ FILE: appsettings.json
     "Salt": "2BfcmATnJ9qH8oMxrOXqn7JFwQ+mbf5QdGwv76nFmjI=",
     "SecretKey": "mflfYqSSkeacMKzgcH4faGv6FcpYEme9ssPwUEVplacVPYTgYwvomwGkftir+lqdvPolUbsilnmX97vcXeyqCA=="
   },
-  "EmailConfig": {
-    "SmtpServer": "smtp.example.com",
-    "Port": 587,
-    "Username": "security@origami7023.cn",
-    "Password": "your_email_password",
-    "FromAddress": "security@origami7023.cn",
-    "ToAddress": "admin@origami7023.cn",
-    "EnableSsl": true
+  "Email": {
+    "NotifyHubAPI": {
+      "BaseUrl": "https://notify.origami7023.cn",
+      "ApiKey": "default-api-key-2024"
+    },
+    "DefaultRecipient": "origami7023@gmail.com"
   }
 }
 

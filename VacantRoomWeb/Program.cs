@@ -14,6 +14,9 @@ builder.Services.AddSignalR(options =>
     options.EnableDetailedErrors = true;
 });
 
+// Register HttpClient for EmailService
+builder.Services.AddHttpClient<IEmailService, EmailService>();
+
 // Register existing services
 builder.Services.AddSingleton<ConnectionCounterService>();
 builder.Services.AddSingleton<ClientConnectionTracker>();
@@ -21,7 +24,6 @@ builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 // Register new security and logging services
 builder.Services.AddSingleton<EnhancedLoggingService>();
-builder.Services.AddSingleton<IEmailService, EmailService>();
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<AdminAuthService>();
 builder.Services.AddSingleton<ApplicationStartupService>();

@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿// SecurityService.cs - 更新部分
+using System.Collections.Concurrent;
 
 namespace VacantRoomWeb
 {
@@ -86,7 +87,12 @@ namespace VacantRoomWeb
                     BanIP(ip, TimeSpan.FromMinutes(15), "DDoS_DETECTED"); // 减少到15分钟
                     _logger.LogAccess(ip, "SECURITY_DDOS_DETECTED", $"Requests in 1min: {requestCount}", userAgent);
 
-                    TriggerEmailAlert("DDoS Attack Detected", $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.");
+                    // 异步发送邮件警报
+                    _ = Task.Run(async () =>
+                    {
+                        await TriggerEmailAlertAsync("DDoS Attack Detected",
+                            $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.", ip);
+                    });
 
                     return false;
                 }
@@ -137,7 +143,12 @@ namespace VacantRoomWeb
                     _recentBreachAttempts.RemoveAll(time => time < tenMinutesAgo);
                     _recentBreachAttempts.Add(now);
 
-                    TriggerEmailAlert("Brute Force Attack Detected", $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.");
+                    // 异步发送邮件警报
+                    _ = Task.Run(async () =>
+                    {
+                        await TriggerEmailAlertAsync("Brute Force Attack Detected",
+                            $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.", ip);
+                    });
 
                     // 系统锁定：10分钟内5个不同IP的暴力破解
                     var recentUniqueAttackers = _loginAttempts
@@ -149,8 +160,12 @@ namespace VacantRoomWeb
                         _adminPanelLockdownUntil = now.AddMinutes(15); // 减少到15分钟
                         _logger.LogAccess(ip, "SECURITY_ADMIN_LOCKDOWN", $"Admin panel locked for 15 minutes due to {recentUniqueAttackers} attackers", userAgent);
 
-                        TriggerEmailAlert("CRITICAL: Admin Panel Locked",
-                            $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}");
+                        // 异步发送系统锁定警报
+                        _ = Task.Run(async () =>
+                        {
+                            await TriggerEmailAlertAsync("CRITICAL: Admin Panel Locked",
+                                $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}", ip);
+                        });
                     }
 
                     return false;
@@ -175,6 +190,28 @@ namespace VacantRoomWeb
             _logger.LogAccess(ip, "SECURITY_IP_BANNED", $"Reason: {reason}, Duration: {duration.TotalMinutes} minutes");
         }
 
+        // 更新为异步邮件警报方法
+        private async Task TriggerEmailAlertAsync(string subject, string message, string ipAddress = null)
+        {
+            var now = DateTime.Now;
+
+            // Rate limit emails: max 1 every 15 minutes
+            if (now.Subtract(_lastEmailSent).TotalMinutes >= 15)
+            {
+                _lastEmailSent = now;
+
+                try
+                {
+                    await _emailService.SendSecurityAlertAsync(subject, message, ipAddress);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogAccess("SYSTEM", "EMAIL_ALERT_FAILED", $"Failed to send email: {ex.Message}");
+                }
+            }
+        }
+
+        // 保持原有同步方法以保证兼容性
         private void TriggerEmailAlert(string subject, string message)
         {
             var now = DateTime.Now;
@@ -217,7 +254,7 @@ namespace VacantRoomWeb
                 {
                     ["TotalBannedIPs"] = _bannedIPs.Count(kvp => kvp.Value > now),
                     ["AdminPanelLocked"] = IsAdminPanelLocked(),
-                    ["LockdownUntil"] = _adminPanelLockdownUntil?.ToString("yyyy-MM-dd HH:mm:ss"),
+                    ["LockdownUntil"] = _adminPanelLockdownUntil?.ToString("yyyy-MM-dd HH:mm:ss") ?? "未锁定",
                     ["RecentBreachAttempts"] = _recentBreachAttempts.Count(t => t > oneDayAgo),
                     ["ActiveIPTracking"] = _ipRequests.Count
                 };
@@ -254,31 +291,6 @@ namespace VacantRoomWeb
             {
                 _bannedIPs.TryRemove(ip, out _);
             }
-        }
-    }
-
-    // Email service interface (placeholder for future implementation)
-    public interface IEmailService
-    {
-        void SendSecurityAlert(string subject, string message);
-    }
-
-    public class EmailService : IEmailService
-    {
-        private readonly EnhancedLoggingService _logger;
-
-        public EmailService(EnhancedLoggingService logger)
-        {
-            _logger = logger;
-        }
-
-        public void SendSecurityAlert(string subject, string message)
-        {
-            // Placeholder implementation - log the email attempt
-            _logger.LogAccess("SYSTEM", "EMAIL_ALERT_TRIGGERED", $"Subject: {subject}, Message: {message}");
-
-            // TODO: Implement actual email sending using SMTP
-            // This will be implemented in the next phase
         }
     }
 }

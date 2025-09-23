@@ -1,0 +1,440 @@
+﻿@page "/admin/email-test"
+@rendermode InteractiveServer
+@inject IEmailService EmailService
+@inject AdminAuthService AuthService
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<PageTitle>邮件服务测试</PageTitle>
+
+@if (!IsAuthenticated)
+{
+    <div class="loading-container">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">加载中...</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="email-test-container">
+        <div class="test-header">
+            <h2>📧 邮件服务测试</h2>
+            <p>测试 VacantRoomWeb 邮件通知系统是否正常工作</p>
+        </div>
+
+        <div class="test-section">
+            <h3>基础邮件测试</h3>
+            <div class="test-card">
+                <div class="test-description">
+                    <h4>服务连通性测试</h4>
+                    <p>测试与 NotifyHubAPI 的连接是否正常，发送一封测试邮件到默认收件人。</p>
+                </div>
+                <div class="test-action">
+                    <button @onclick="RunBasicTest"
+                            disabled="@IsTesting"
+                            class="btn btn-primary">
+                        @if (IsTesting && CurrentTest == "basic")
+                        {
+                            <span>🔄 测试中...</span>
+                        }
+                        else
+                        {
+                            <span>🧪 运行基础测试</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>安全警报测试</h3>
+            <div class="test-card">
+                <div class="test-description">
+                    <h4>安全警报邮件</h4>
+                    <p>模拟安全事件，测试安全警报邮件的发送功能。</p>
+                </div>
+                <div class="test-action">
+                    <button @onclick="RunSecurityTest"
+                            disabled="@IsTesting"
+                            class="btn btn-warning">
+                        @if (IsTesting && CurrentTest == "security")
+                        {
+                            <span>🔄 测试中...</span>
+                        }
+                        else
+                        {
+                            <span>⚠️ 测试安全警报</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>系统通知测试</h3>
+            <div class="test-card">
+                <div class="test-description">
+                    <h4>系统通知邮件</h4>
+                    <p>测试系统通知邮件的发送功能。</p>
+                </div>
+                <div class="test-action">
+                    <button @onclick="RunSystemNotificationTest"
+                            disabled="@IsTesting"
+                            class="btn btn-info">
+                        @if (IsTesting && CurrentTest == "notification")
+                        {
+                            <span>🔄 测试中...</span>
+                        }
+                        else
+                        {
+                            <span>📢 测试系统通知</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        @if (TestResults.Any())
+        {
+            <div class="results-section">
+                <h3>测试结果</h3>
+                <div class="results-container">
+                    @foreach (var result in TestResults.OrderByDescending(r => r.Timestamp))
+                    {
+                        <div class="result-item @(result.Success ? "success" : "error")">
+                            <div class="result-header">
+                                <span class="result-type">@result.TestType</span>
+                                <span class="result-time">@result.Timestamp.ToString("HH:mm:ss")</span>
+                                <span class="result-status">@(result.Success ? "✅ 成功" : "❌ 失败")</span>
+                            </div>
+                            <div class="result-message">
+                                @result.Message
+                            </div>
+                            @if (!string.IsNullOrEmpty(result.Details))
+                            {
+                                <div class="result-details">
+                                    <strong>详细信息：</strong> @result.Details
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <div class="actions-section">
+            <button @onclick="ClearResults" class="btn btn-secondary">🗑️ 清空结果</button>
+            <button @onclick="GoBack" class="btn btn-outline-secondary">← 返回管理后台</button>
+        </div>
+    </div>
+}
+
+<style>
+    .email-test-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .test-header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 10px;
+    }
+
+    .test-section {
+        margin-bottom: 25px;
+    }
+
+        .test-section h3 {
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+    .test-card {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+    }
+
+    .test-description {
+        flex: 1;
+    }
+
+        .test-description h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .test-description p {
+            margin: 0;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+
+    .test-action {
+        flex-shrink: 0;
+    }
+
+    .results-section {
+        margin-top: 30px;
+    }
+
+    .results-container {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+
+    .result-item {
+        margin-bottom: 15px;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid;
+    }
+
+        .result-item.success {
+            background-color: #d4edda;
+            border-left-color: #28a745;
+        }
+
+        .result-item.error {
+            background-color: #f8d7da;
+            border-left-color: #dc3545;
+        }
+
+    .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        font-weight: 600;
+    }
+
+    .result-message {
+        margin-bottom: 5px;
+        font-size: 0.95em;
+    }
+
+    .result-details {
+        font-size: 0.85em;
+        color: #6c757d;
+        font-family: monospace;
+    }
+
+    .actions-section {
+        margin-top: 30px;
+        text-align: center;
+        display: flex;
+        gap: 15px;
+        justify-content: center;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: 500;
+        text-decoration: none;
+        display: inline-block;
+        text-align: center;
+    }
+
+    .btn-primary {
+        background: #667eea;
+        color: white;
+    }
+
+    .btn-warning {
+        background: #ffc107;
+        color: #212529;
+    }
+
+    .btn-info {
+        background: #17a2b8;
+        color: white;
+    }
+
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+
+    .btn-outline-secondary {
+        background: transparent;
+        color: #6c757d;
+        border: 1px solid #6c757d;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn:hover:not(:disabled) {
+        opacity: 0.9;
+        transform: translateY(-1px);
+    }
+
+    {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .actions-section {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    }
+</style>
+
+@code {
+    private bool IsAuthenticated = false;
+    private bool IsTesting = false;
+    private string CurrentTest = "";
+    private List<TestResult> TestResults = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        IsAuthenticated = AuthService.IsAuthenticated();
+
+        if (!IsAuthenticated)
+        {
+            Navigation.NavigateTo("/admin/login");
+            return;
+        }
+    }
+
+    private async Task RunBasicTest()
+    {
+        IsTesting = true;
+        CurrentTest = "basic";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.TestEmailServiceAsync();
+
+            AddTestResult("基础连通性测试", success,
+                success ? "邮件服务连接正常，测试邮件发送成功" : "邮件服务连接失败或发送失败",
+                success ? "API连接正常，邮件已发送到默认收件人" : "请检查API配置和网络连接");
+        }
+        catch (Exception ex)
+        {
+            AddTestResult("基础连通性测试", false, "测试过程中发生异常", ex.Message);
+        }
+        finally
+        {
+            IsTesting = false;
+            CurrentTest = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunSecurityTest()
+    {
+        IsTesting = true;
+        CurrentTest = "security";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSecurityAlertAsync(
+                "测试安全警报",
+                "这是一个测试安全警报，用于验证安全邮件通知功能是否正常工作。",
+                "192.168.1.100");
+
+            AddTestResult("安全警报测试", success,
+                success ? "安全警报邮件发送成功" : "安全警报邮件发送失败",
+                success ? "安全警报邮件已发送，包含完整的安全事件信息" : "请检查邮件服务配置");
+        }
+        catch (Exception ex)
+        {
+            AddTestResult("安全警报测试", false, "测试过程中发生异常", ex.Message);
+        }
+        finally
+        {
+            IsTesting = false;
+            CurrentTest = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunSystemNotificationTest()
+    {
+        IsTesting = true;
+        CurrentTest = "notification";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSystemNotificationAsync(
+                "系统通知测试",
+                "这是一个系统通知测试邮件，用于验证系统通知功能是否正常工作。系统当前运行正常，所有服务都在线。");
+
+            AddTestResult("系统通知测试", success,
+                success ? "系统通知邮件发送成功" : "系统通知邮件发送失败",
+                success ? "系统通知邮件已发送，格式正确" : "请检查邮件服务配置");
+        }
+        catch (Exception ex)
+        {
+            AddTestResult("系统通知测试", false, "测试过程中发生异常", ex.Message);
+        }
+        finally
+        {
+            IsTesting = false;
+            CurrentTest = "";
+            StateHasChanged();
+        }
+    }
+
+    private void AddTestResult(string testType, bool success, string message, string details = "")
+    {
+        TestResults.Add(new TestResult
+        {
+            TestType = testType,
+            Success = success,
+            Message = message,
+            Details = details,
+            Timestamp = DateTime.Now
+        });
+
+        // 只保留最近10个测试结果
+        if (TestResults.Count > 10)
+        {
+            TestResults = TestResults.OrderByDescending(r => r.Timestamp).Take(10).ToList();
+        }
+    }
+
+    private void ClearResults()
+    {
+        TestResults.Clear();
+        StateHasChanged();
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/admin");
+    }
+
+    public class TestResult
+    {
+        public string TestType { get; set; } = "";
+        public bool Success { get; set; }
+        public string Message { get; set; } = "";
+        public string Details { get; set; } = "";
+        public DateTime Timestamp { get; set; }
+    }
+}

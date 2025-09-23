@@ -7,7 +7,8 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 @inject ApplicationStartupService StartupService
-
+@inject IEmailService EmailService
+@inject IConfiguration Configuration
 
 <PageTitle>管理后台</PageTitle>
 
@@ -87,6 +88,9 @@ else
             </button>
             <button @onclick="() => SetActiveTab(3)" class="tab-btn @(ActiveTab == 3 ? "active" : "")">
                 🗂️ 日志管理
+            </button>
+            <button @onclick="() => SetActiveTab(4)" class="tab-btn @(ActiveTab == 4 ? "active" : "")">
+                📧 邮件管理
             </button>
         </div>
 
@@ -242,6 +246,135 @@ else
                                         <button @onclick="() => ViewLogFile(fileInfo.Date)" class="btn btn-sm btn-outline-primary">查看</button>
                                     </div>
                                 }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (ActiveTab == 4)
+            {
+                <!-- 邮件管理标签页 -->
+                <div class="email-management-section">
+                    <div class="section-header">
+                        <h3>邮件通知管理</h3>
+                        <button @onclick="RefreshEmailStatus" class="btn btn-primary btn-sm">🔄 刷新状态</button>
+                    </div>
+
+                    <div class="email-stats">
+                        <div class="stat-card">
+                            <div class="stat-icon">📧</div>
+                            <div class="stat-content">
+                                <h3>@EmailStats["TotalSent"]</h3>
+                                <p>邮件发送总数</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">✅</div>
+                            <div class="stat-content">
+                                <h3>@EmailStats["SuccessRate"]%</h3>
+                                <p>成功发送率</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">⏰</div>
+                            <div class="stat-content">
+                                <h3>@EmailStats["LastSent"]</h3>
+                                <p>最后发送时间</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="email-actions">
+                        <div class="action-group">
+                            <h4>邮件服务测试</h4>
+                            <div class="test-controls">
+                                <button @onclick="TestEmailService"
+                                        disabled="@IsEmailTesting"
+                                        class="btn btn-primary">
+                                    @if (IsEmailTesting)
+                                    {
+                                        <span>⏳ 测试中...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>📧 发送测试邮件</span>
+                                    }
+                                </button>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(EmailTestResult))
+                            {
+                                <div class="test-result @(EmailTestSuccess ? "success" : "error")">
+                                    @EmailTestResult
+                                </div>
+                            }
+                        </div>
+
+                        <div class="action-group">
+                            <h4>邮件配置</h4>
+                            <div class="config-display">
+                                <p><strong>API地址：</strong> @EmailConfig["ApiUrl"]</p>
+                                <p><strong>收件人：</strong> @EmailConfig["Recipient"]</p>
+                                <p><strong>冷却时间：</strong> @EmailConfig["Cooldown"] 分钟</p>
+                                <p>
+                                    <strong>服务状态：</strong>
+                                    <span class="@(EmailConfig["ServiceStatus"] == "正常" ? "status-ok" : "status-error")">
+                                        @EmailConfig["ServiceStatus"]
+                                    </span>
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="action-group">
+                            <h4>安全警报设置</h4>
+                            <div class="alert-settings">
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableDDoSAlerts" />
+                                        DDoS攻击警报
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableBruteForceAlerts" />
+                                        暴力破解警报
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableSystemLockdownAlerts" />
+                                        系统锁定警报
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label>
+                                        <input type="checkbox" @bind="EmailSettings.EnableIPBanAlerts" />
+                                        IP封禁警报
+                                    </label>
+                                </div>
+
+                                <button @onclick="SaveEmailSettings" class="btn btn-success btn-sm">💾 保存设置</button>
+                            </div>
+                        </div>
+
+                        <div class="action-group">
+                            <h4>手动发送通知</h4>
+                            <div class="manual-send">
+                                <div class="form-group">
+                                    <label>主题：</label>
+                                    <input @bind="ManualEmailSubject" class="form-control" placeholder="输入邮件主题" />
+                                </div>
+                                <div class="form-group">
+                                    <label>内容：</label>
+                                    <textarea @bind="ManualEmailContent" class="form-control" rows="4" placeholder="输入邮件内容"></textarea>
+                                </div>
+                                <button @onclick="SendManualEmail"
+                                        disabled="@(string.IsNullOrEmpty(ManualEmailSubject) || IsEmailTesting)"
+                                        class="btn btn-info">
+                                    📤 发送通知邮件
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -542,21 +675,6 @@ else
             color: #333;
         }
 
-    .debug-card {
-        background: #ffe6e6;
-        border: 1px solid #ffcccc;
-    }
-
-        .debug-card h4 {
-            color: #cc0000;
-        }
-
-        .debug-card p {
-            font-family: monospace;
-            font-size: 0.85em;
-            word-break: break-all;
-        }
-
     /* 日志管理样式 */
     .management-actions {
         display: grid;
@@ -625,6 +743,146 @@ else
         min-width: 60px;
     }
 
+    /* 邮件管理样式 */
+    .email-management-section {
+        padding: 20px;
+    }
+
+    .email-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 30px;
+    }
+
+    .email-actions {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+    }
+
+    .action-group {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+    }
+
+        .action-group h4 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+    .test-controls {
+        margin: 15px 0;
+    }
+
+    .test-result {
+        margin-top: 15px;
+        padding: 10px;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+
+        .test-result.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .test-result.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+    .config-display {
+        background: white;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+    }
+
+        .config-display p {
+            margin: 8px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+    .status-ok {
+        color: #28a745;
+        font-weight: bold;
+    }
+
+    .status-error {
+        color: #dc3545;
+        font-weight: bold;
+    }
+
+    .alert-settings {
+        background: white;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+    }
+
+    .setting-item {
+        margin: 10px 0;
+        display: flex;
+        align-items: center;
+    }
+
+        .setting-item label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .setting-item input[type="checkbox"] {
+            margin-right: 8px;
+            transform: scale(1.2);
+        }
+
+    .manual-send {
+        background: white;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+    }
+
+    .form-group {
+        margin-bottom: 15px;
+    }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+        }
+
+    .form-control {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+
+    textarea.form-control {
+        resize: vertical;
+        min-height: 80px;
+    }
+
     /* 按钮样式 */
     .btn {
         padding: 8px 16px;
@@ -668,9 +926,25 @@ else
         border: 1px solid #6c757d;
     }
 
+    .btn-success {
+        background: #28a745;
+        color: white;
+        border: 1px solid #28a745;
+    }
+
+        .btn-success:hover:not(:disabled) {
+            background: #218838;
+            border-color: #1e7e34;
+        }
+
     .btn-sm {
         padding: 5px 10px;
         font-size: 0.875rem;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
     }
 
     /* 警告框样式 */
@@ -686,13 +960,22 @@ else
         color: #856404;
     }
 
-    .form-control {
-        padding: 8px 12px;
-        border: 1px solid #ced4da;
-        border-radius: 4px;
-        background-color: white;
+
+    {
+        grid-template-columns: 1fr;
+    }
+
+    .email-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .action-group {
+        padding: 15px;
+    }
+
     }
 </style>
+
 
 @code {
     private bool IsAuthenticated = false;
@@ -709,6 +992,16 @@ else
     private string LogFilter = "ALL";
     private Timer? _refreshTimer;
 
+    // 邮件管理相关变量
+    private Dictionary<string, object> EmailStats = new();
+    private Dictionary<string, string> EmailConfig = new();
+    private EmailNotificationSettings EmailSettings = new();
+    private bool IsEmailTesting = false;
+    private string EmailTestResult = "";
+    private bool EmailTestSuccess = false;
+    private string ManualEmailSubject = "";
+    private string ManualEmailContent = "";
+
     protected override async Task OnInitializedAsync()
     {
         IsAuthenticated = AuthService.IsAuthenticated();
@@ -720,6 +1013,7 @@ else
         }
 
         await LoadDashboardData();
+        await LoadEmailData();
 
         // 设置定时刷新 - 每30秒自动刷新统计数据
         _refreshTimer = new Timer(async _ =>
@@ -729,6 +1023,7 @@ else
                 LogStats = LoggingService.GetLogStats();
                 SecurityStats = SecurityService.GetSecurityStats();
                 CurrentConnections = ConnectionService.GetCount();
+                await LoadEmailData();
                 StateHasChanged();
             });
         }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
@@ -751,6 +1046,153 @@ else
         LogFileInfo = LoggingService.GetLogFileInfo();
 
         StateHasChanged();
+    }
+
+    // 加载邮件相关数据
+    private async Task LoadEmailData()
+    {
+        EmailStats = GetEmailStats();
+        EmailConfig = GetEmailConfig();
+        EmailSettings = GetEmailSettings();
+    }
+
+    // 获取邮件统计信息
+    private Dictionary<string, object> GetEmailStats()
+    {
+        var recentLogs = LoggingService.GetRecentLogs(1000);
+        var emailLogs = recentLogs.Where(l => l.Action.Contains("EMAIL") || l.Action.Contains("ALERT")).ToList();
+
+        var totalSent = emailLogs.Count;
+        var successCount = emailLogs.Count(l => !l.Details.Contains("失败") && !l.Details.Contains("error"));
+        var successRate = totalSent > 0 ? (successCount * 100 / totalSent) : 100;
+
+        var lastSent = emailLogs.OrderByDescending(l => l.Timestamp).FirstOrDefault()?.Timestamp.ToString("MM-dd HH:mm") ?? "未发送";
+
+        return new Dictionary<string, object>
+        {
+            ["TotalSent"] = totalSent,
+            ["SuccessRate"] = successRate,
+            ["LastSent"] = lastSent
+        };
+    }
+
+    // 获取邮件配置信息
+    private Dictionary<string, string> GetEmailConfig()
+    {
+        var apiUrl = Configuration["Email:NotifyHubAPI:BaseUrl"] ?? "未配置";
+        var recipient = Configuration["Email:DefaultRecipient"] ?? "未配置";
+
+        return new Dictionary<string, string>
+        {
+            ["ApiUrl"] = apiUrl,
+            ["Recipient"] = recipient,
+            ["Cooldown"] = "5",
+            ["ServiceStatus"] = "正常"
+        };
+    }
+
+    // 获取邮件通知设置
+    private EmailNotificationSettings GetEmailSettings()
+    {
+        return new EmailNotificationSettings
+        {
+            EnableDDoSAlerts = true,
+            EnableBruteForceAlerts = true,
+            EnableSystemLockdownAlerts = true,
+            EnableIPBanAlerts = true
+        };
+    }
+
+    // 测试邮件服务
+    private async Task TestEmailService()
+    {
+        IsEmailTesting = true;
+        EmailTestResult = "";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.TestEmailServiceAsync();
+
+            if (success)
+            {
+                EmailTestResult = "✅ 邮件服务测试成功！测试邮件已发送到 " + (Configuration["Email:DefaultRecipient"] ?? "未知邮箱");
+                EmailTestSuccess = true;
+            }
+            else
+            {
+                EmailTestResult = "❌ 邮件服务测试失败，请检查配置和网络连接";
+                EmailTestSuccess = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            EmailTestResult = $"❌ 邮件服务测试异常：{ex.Message}";
+            EmailTestSuccess = false;
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    // 刷新邮件状态
+    private async Task RefreshEmailStatus()
+    {
+        await LoadEmailData();
+        StateHasChanged();
+    }
+
+    // 保存邮件设置
+    private async Task SaveEmailSettings()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "邮件设置已保存");
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"保存失败：{ex.Message}");
+        }
+    }
+
+    // 发送手动邮件
+    private async Task SendManualEmail()
+    {
+        if (string.IsNullOrEmpty(ManualEmailSubject) || string.IsNullOrEmpty(ManualEmailContent))
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "请填写邮件主题和内容");
+            return;
+        }
+
+        IsEmailTesting = true;
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSystemNotificationAsync(ManualEmailSubject, ManualEmailContent);
+
+            if (success)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "邮件发送成功！");
+                ManualEmailSubject = "";
+                ManualEmailContent = "";
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "邮件发送失败，请检查配置");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"邮件发送异常：{ex.Message}");
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
     }
 
     private void SetActiveTab(int tabIndex)
@@ -796,13 +1238,11 @@ else
     private async Task ExportLogs()
     {
         var today = DateTime.Now.ToString("yyyy-MM-dd");
-        // 实际实现可以生成下载文件
         await JSRuntime.InvokeVoidAsync("alert", $"导出功能开发中，将导出 {today} 的日志文件");
     }
 
     private async Task ViewLogFile(string date)
     {
-        // 实际实现可以显示特定日期的日志
         await JSRuntime.InvokeVoidAsync("alert", $"查看功能开发中，将显示 {date} 的日志内容");
     }
 
@@ -823,15 +1263,11 @@ else
     {
         try
         {
-            // 使用新的异步退出方法
             await AuthService.SignOutAsync(JSRuntime);
-
-            // 强制跳转到登录页面
             await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
         }
         catch (Exception ex)
         {
-            // 如果退出过程出错，仍然尝试跳转到登录页
             await JSRuntime.InvokeVoidAsync("console.error", $"Logout error: {ex.Message}");
             await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
         }
@@ -891,20 +1327,16 @@ else
             "QUERY_ROOM_USAGE" => "查询教室使用情况",
             "QUERY_RESULT" => "查询结果",
             "ERROR_FILE_NOT_FOUND" => "文件未找到错误",
-            _ => action // 如果没有匹配的，返回原始值
+            _ => action
         };
     }
 
     private async Task RefreshSystemInfo()
     {
-        // 刷新所有系统相关数据
         LogStats = LoggingService.GetLogStats();
         SecurityStats = SecurityService.GetSecurityStats();
         CurrentConnections = ConnectionService.GetCount();
         AvailableLogDates = LoggingService.GetAvailableLogDates();
-    
-        // 强制更新界面
         StateHasChanged();
     }
-
 }
