@@ -1,6 +1,7 @@
-﻿// Services/EmailService.cs
+﻿// Services/EmailService.cs - 更新版本
 using System.Text;
 using System.Text.Json;
+using VacantRoomWeb.Services;
 
 namespace VacantRoomWeb
 {
@@ -16,28 +17,26 @@ namespace VacantRoomWeb
     public class EmailService : IEmailService
     {
         private readonly HttpClient _httpClient;
-        private readonly IConfiguration _configuration;
+        private readonly IConfigurationService _configService;
         private readonly ILogger<EmailService> _logger;
-        private readonly string _apiUrl;
-        private readonly string _apiKey;
-        private readonly string _defaultRecipient;
+        private readonly EmailConfig _emailConfig;
         private DateTime _lastEmailSent = DateTime.MinValue;
-        private readonly TimeSpan _emailCooldown = TimeSpan.FromMinutes(5); // 防止邮件轰炸
+        private readonly TimeSpan _emailCooldown;
 
-        public EmailService(HttpClient httpClient, IConfiguration configuration, ILogger<EmailService> logger)
+        public EmailService(HttpClient httpClient, IConfigurationService configService, ILogger<EmailService> logger)
         {
             _httpClient = httpClient;
-            _configuration = configuration;
+            _configService = configService;
             _logger = logger;
 
-            _apiUrl = _configuration["Email:NotifyHubAPI:BaseUrl"] ?? "https://notify.origami7023.cn";
-            _apiKey = _configuration["Email:NotifyHubAPI:ApiKey"] ?? "default-api-key-2024";
-            _defaultRecipient = _configuration["Email:DefaultRecipient"] ?? "origami7023@gmail.com";
+            // 从配置服务获取邮件配置
+            _emailConfig = _configService.GetEmailConfig();
+            _emailCooldown = TimeSpan.FromMinutes(_emailConfig.CooldownMinutes);
 
             // 配置 HttpClient
             _httpClient.DefaultRequestHeaders.Clear();
-            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _apiKey);
-            _httpClient.Timeout = TimeSpan.FromSeconds(30);
+            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _emailConfig.NotifyHubAPI.ApiKey);
+            _httpClient.Timeout = TimeSpan.FromSeconds(_emailConfig.TimeoutSeconds);
         }
 
         public async Task<bool> SendSecurityAlertAsync(string alertType, string details, string ipAddress = null)
@@ -54,7 +53,7 @@ namespace VacantRoomWeb
                 var subject = $"🚨 VacantRoomWeb 安全警报 - {alertType}";
                 var body = GenerateSecurityAlertEmailBody(alertType, details, ipAddress);
 
-                var success = await SendEmailAsync(new[] { _defaultRecipient }, subject, body, true, "SECURITY_ALERT");
+                var success = await SendEmailAsync(new[] { _emailConfig.DefaultRecipient }, subject, body, true, "SECURITY_ALERT");
 
                 if (success)
                 {
@@ -78,7 +77,7 @@ namespace VacantRoomWeb
                 var fullSubject = $"📢 VacantRoomWeb 系统通知 - {subject}";
                 var body = GenerateSystemNotificationEmailBody(subject, message);
 
-                return await SendEmailAsync(new[] { _defaultRecipient }, fullSubject, body, true, "SYSTEM_NOTIFICATION");
+                return await SendEmailAsync(new[] { _emailConfig.DefaultRecipient }, fullSubject, body, true, "SYSTEM_NOTIFICATION");
             }
             catch (Exception ex)
             {
@@ -107,7 +106,7 @@ namespace VacantRoomWeb
                 var subject = "VacantRoomWeb 邮件服务测试";
                 var body = GenerateTestEmailBody();
 
-                return await SendEmailAsync(new[] { _defaultRecipient }, subject, body, true, "TEST");
+                return await SendEmailAsync(new[] { _emailConfig.DefaultRecipient }, subject, body, true, "TEST");
             }
             catch (Exception ex)
             {
@@ -135,53 +134,69 @@ namespace VacantRoomWeb
 
         private async Task<bool> SendEmailAsync(string[] recipients, string subject, string body, bool isHtml, string category)
         {
-            try
+            var retryCount = 0;
+            while (retryCount <= _emailConfig.MaxRetries)
             {
-                var requestData = new
+                try
                 {
-                    to = recipients,
-                    subject = subject,
-                    body = body,
-                    category = category,
-                    isHtml = isHtml,
-                    priority = category == "SECURITY_ALERT" ? 2 : 1 // 安全警报设为高优先级
-                };
+                    var requestData = new
+                    {
+                        to = recipients,
+                        subject = subject,
+                        body = body,
+                        category = category,
+                        isHtml = isHtml,
+                        priority = category == "SECURITY_ALERT" ? 2 : 1 // 安全警报设为高优先级
+                    };
 
-                var jsonContent = JsonSerializer.Serialize(requestData);
-                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                    var jsonContent = JsonSerializer.Serialize(requestData);
+                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-                var response = await _httpClient.PostAsync($"{_apiUrl}/api/email/send", content);
+                    var response = await _httpClient.PostAsync($"{_emailConfig.NotifyHubAPI.BaseUrl}/api/email/send", content);
 
-                if (response.IsSuccessStatusCode)
-                {
-                    var responseContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogInformation("邮件发送成功：{Subject}", subject);
-                    return true;
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var responseContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogInformation("邮件发送成功：{Subject}", subject);
+                        return true;
+                    }
+                    else
+                    {
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("邮件发送失败：{StatusCode} {Content}", response.StatusCode, errorContent);
+
+                        // 如果是客户端错误（4xx），不重试
+                        if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
+                        {
+                            return false;
+                        }
+                    }
                 }
-                else
+                catch (HttpRequestException ex)
                 {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("邮件发送失败：{StatusCode} {Content}", response.StatusCode, errorContent);
-                    return false;
+                    _logger.LogError(ex, "邮件API网络请求失败 (尝试 {Retry}/{MaxRetries})", retryCount + 1, _emailConfig.MaxRetries + 1);
+                }
+                catch (TaskCanceledException ex)
+                {
+                    _logger.LogError(ex, "邮件发送超时 (尝试 {Retry}/{MaxRetries})", retryCount + 1, _emailConfig.MaxRetries + 1);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "邮件发送异常 (尝试 {Retry}/{MaxRetries})", retryCount + 1, _emailConfig.MaxRetries + 1);
+                }
+
+                retryCount++;
+                if (retryCount <= _emailConfig.MaxRetries)
+                {
+                    // 指数退避重试
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, retryCount)));
                 }
             }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "邮件API网络请求失败");
-                return false;
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogError(ex, "邮件发送超时");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "邮件发送异常");
-                return false;
-            }
+
+            return false;
         }
 
+        // 其他私有方法保持不变...
         private string GenerateSecurityAlertEmailBody(string alertType, string details, string ipAddress)
         {
             var serverTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
@@ -329,8 +344,8 @@ namespace VacantRoomWeb
             <h3>测试信息：</h3>
             <ul>
                 <li><strong>测试时间：</strong> {serverTime}</li>
-                <li><strong>API地址：</strong> {_apiUrl}</li>
-                <li><strong>收件人：</strong> {_defaultRecipient}</li>
+                <li><strong>API地址：</strong> {_emailConfig.NotifyHubAPI.BaseUrl}</li>
+                <li><strong>收件人：</strong> {_emailConfig.DefaultRecipient}</li>
                 <li><strong>服务器：</strong> {Environment.MachineName}</li>
             </ul>
 

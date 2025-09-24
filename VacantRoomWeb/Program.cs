@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using VacantRoomWeb;
 using VacantRoomWeb.Components;
+using VacantRoomWeb.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +14,9 @@ builder.Services.AddSignalR(options =>
     options.MaximumReceiveMessageSize = null;
     options.EnableDetailedErrors = true;
 });
+
+// Register configuration service first (other services depend on it)
+builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
 
 // Register HttpClient for EmailService
 builder.Services.AddHttpClient<IEmailService, EmailService>();

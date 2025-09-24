@@ -1,30 +1,25 @@
-﻿using System.Security.Cryptography;
+﻿// AdminAuthService.cs - 更新版本
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.JSInterop;
+using VacantRoomWeb.Services;
 
 namespace VacantRoomWeb
 {
-    public class AdminConfig
-    {
-        public string Username { get; set; } = "";
-        public string PasswordHash { get; set; } = "";
-        public string Salt { get; set; } = "";
-    }
-
     public class AdminAuthService
     {
-        private readonly IConfiguration _configuration;
+        private readonly IConfigurationService _configService;
         private readonly SecurityService _securityService;
         private readonly EnhancedLoggingService _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
         public AdminAuthService(
-            IConfiguration configuration,
+            IConfigurationService configService,
             SecurityService securityService,
             EnhancedLoggingService logger,
             IHttpContextAccessor httpContextAccessor)
         {
-            _configuration = configuration;
+            _configService = configService;
             _securityService = securityService;
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
@@ -35,9 +30,9 @@ namespace VacantRoomWeb
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
             var userAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString() ?? "";
 
-            var adminConfig = _configuration.GetSection("AdminConfig").Get<AdminConfig>();
+            var adminConfig = _configService.GetAdminConfig();
 
-            if (adminConfig == null || string.IsNullOrEmpty(adminConfig.Username))
+            if (string.IsNullOrEmpty(adminConfig.Username))
             {
                 _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration not found", userAgent);
                 return false;
@@ -93,8 +88,6 @@ namespace VacantRoomWeb
             }
             catch (InvalidOperationException)
             {
-                // Response has already started, can't set cookie through HttpContext
-                // This will be handled by the caller using JavaScript
                 var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
                 _logger.LogAccess(ip, "ADMIN_AUTH_COOKIE_SET_FAILED", "Response already started");
                 throw;
@@ -121,19 +114,15 @@ namespace VacantRoomWeb
 
             try
             {
-                // 尝试通过 HttpContext 删除 Cookie
                 context.Response.Cookies.Delete("AdminAuth");
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
             }
             catch (InvalidOperationException)
             {
-                // 响应已经开始，无法通过 HttpContext 删除 Cookie
-                // 这种情况下，我们依赖前端 JavaScript 来删除 Cookie
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie will be deleted via JavaScript");
             }
         }
 
-        // 新增：通过 JavaScript 删除 Cookie 的异步方法
         public async Task SignOutAsync(IJSRuntime jsRuntime)
         {
             var context = _httpContextAccessor.HttpContext;
@@ -143,13 +132,11 @@ namespace VacantRoomWeb
 
             try
             {
-                // 首先尝试通过 HttpContext 删除
                 context.Response.Cookies.Delete("AdminAuth");
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
             }
             catch (InvalidOperationException)
             {
-                // 如果 HttpContext 方式失败，使用 JavaScript 删除
                 await jsRuntime.InvokeVoidAsync("eval",
                     "document.cookie = 'AdminAuth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; samesite=strict'");
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via JavaScript");
@@ -200,7 +187,8 @@ namespace VacantRoomWeb
 
         private string ComputeHmac(string data)
         {
-            var key = _configuration["AdminConfig:SecretKey"] ?? "DefaultSecretKey";
+            var adminConfig = _configService.GetAdminConfig();
+            var key = adminConfig.SecretKey ?? "DefaultSecretKey";
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
             var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
             return Convert.ToBase64String(hash);
@@ -237,7 +225,7 @@ namespace VacantRoomWeb
 
         public AdminConfig? GetAdminConfig()
         {
-            return _configuration.GetSection("AdminConfig").Get<AdminConfig>();
+            return _configService.GetAdminConfig();
         }
 
         public bool ValidatePassword(string password, string storedHash, string salt)
