@@ -1,45 +1,34 @@
-﻿namespace VacantRoomWeb
+﻿using VacantRoomWeb.Services;
+
+namespace VacantRoomWeb
 {
     /// <summary>
-    /// 跟踪应用程序实际启动时间的服务
+    /// 兼容性适配器 - 保持现有代码的接口不变
+    /// 内部委托给基于文件的 StartupLoggingService
     /// </summary>
     public class ApplicationStartupService
     {
-        // 使用静态字段，但通过静态构造函数确保在应用启动时初始化
-        private static readonly DateTime _applicationStartTime;
+        private readonly IStartupLoggingService _startupLoggingService;
 
-        static ApplicationStartupService()
+        public ApplicationStartupService(IStartupLoggingService startupLoggingService)
         {
-            _applicationStartTime = DateTime.Now;
+            _startupLoggingService = startupLoggingService;
         }
 
         public DateTime GetApplicationStartTime()
         {
-            return _applicationStartTime;
+            return _startupLoggingService.GetApplicationStartTime();
         }
 
         public string GetUptime()
         {
-            var uptime = DateTime.Now - _applicationStartTime;
+            var uptime = _startupLoggingService.GetUptime();
             return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
         }
 
         public string GetDetailedUptime()
         {
-            var uptime = DateTime.Now - _applicationStartTime;
-
-            if (uptime.TotalDays >= 1)
-            {
-                return $"{uptime.Days}天 {uptime.Hours}小时 {uptime.Minutes}分钟";
-            }
-            else if (uptime.TotalHours >= 1)
-            {
-                return $"{uptime.Hours}小时 {uptime.Minutes}分钟";
-            }
-            else
-            {
-                return $"{uptime.Minutes}分钟 {uptime.Seconds}秒";
-            }
+            return _startupLoggingService.GetDetailedUptime();
         }
 
         /// <summary>
@@ -47,17 +36,17 @@
         /// </summary>
         public Dictionary<string, string> GetStartupInfo()
         {
-            var uptime = DateTime.Now - _applicationStartTime;
+            var startupInfo = _startupLoggingService.GetStartupInfo();
 
             return new Dictionary<string, string>
             {
-                ["StartTime"] = _applicationStartTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                ["Uptime"] = GetDetailedUptime(),
-                ["TotalHours"] = uptime.TotalHours.ToString("F1"),
-                ["Environment"] = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "未知",
-                ["MachineName"] = Environment.MachineName,
-                ["ProcessorCount"] = Environment.ProcessorCount.ToString(),
-                ["WorkingSet"] = $"{Environment.WorkingSet / 1024 / 1024:F0} MB"
+                ["StartTime"] = startupInfo.StartTime,
+                ["Uptime"] = startupInfo.Uptime,
+                ["TotalHours"] = startupInfo.TotalHours,
+                ["Environment"] = startupInfo.Environment,
+                ["MachineName"] = startupInfo.MachineName,
+                ["ProcessorCount"] = startupInfo.ProcessorCount,
+                ["WorkingSet"] = startupInfo.WorkingSet
             };
         }
     }

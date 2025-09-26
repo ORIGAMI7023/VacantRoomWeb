@@ -1,359 +1,275 @@
-﻿// Services/EmailService.cs - 更新版本
+﻿// Services/EmailService.cs
 using System.Text;
 using System.Text.Json;
-using VacantRoomWeb.Services;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Services
 {
-    public interface IEmailService
-    {
-        Task<bool> SendSecurityAlertAsync(string alertType, string details, string ipAddress = null);
-        Task<bool> SendSystemNotificationAsync(string subject, string message);
-        Task<bool> SendCustomEmailAsync(string[] recipients, string subject, string body, bool isHtml = false);
-        Task<bool> TestEmailServiceAsync();
-        void SendSecurityAlert(string subject, string message); // 保持原有同步接口
-    }
-
     public class EmailService : IEmailService
     {
         private readonly HttpClient _httpClient;
-        private readonly IConfigurationService _configService;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<EmailService> _logger;
-        private readonly EmailConfig _emailConfig;
-        private DateTime _lastEmailSent = DateTime.MinValue;
-        private readonly TimeSpan _emailCooldown;
+        private readonly Dictionary<string, DateTime> _lastSentTimes = new();
+        private readonly object _cooldownLock = new();
 
-        public EmailService(HttpClient httpClient, IConfigurationService configService, ILogger<EmailService> logger)
+        public EmailService(HttpClient httpClient, IConfiguration configuration, ILogger<EmailService> logger)
         {
             _httpClient = httpClient;
-            _configService = configService;
+            _configuration = configuration;
             _logger = logger;
 
-            // 从配置服务获取邮件配置
-            _emailConfig = _configService.GetEmailConfig();
-            _emailCooldown = TimeSpan.FromMinutes(_emailConfig.CooldownMinutes);
-
-            // 配置 HttpClient
-            _httpClient.DefaultRequestHeaders.Clear();
-            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _emailConfig.NotifyHubAPI.ApiKey);
-            _httpClient.Timeout = TimeSpan.FromSeconds(_emailConfig.TimeoutSeconds);
+            ConfigureHttpClient();
         }
 
-        public async Task<bool> SendSecurityAlertAsync(string alertType, string details, string ipAddress = null)
+        private void ConfigureHttpClient()
         {
-            try
+            var timeoutSeconds = _configuration.GetValue<int>("Email:TimeoutSeconds", 30);
+            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        }
+
+        public async Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null)
+        {
+            if (!CheckCooldown("security_alert"))
             {
-                // 检查邮件发送频率限制
-                if (DateTime.Now - _lastEmailSent < _emailCooldown)
-                {
-                    _logger.LogInformation("邮件发送被跳过：冷却时间内 ({Cooldown}分钟)", _emailCooldown.TotalMinutes);
-                    return true; // 返回true避免影响主要逻辑
-                }
-
-                var subject = $"🚨 VacantRoomWeb 安全警报 - {alertType}";
-                var body = GenerateSecurityAlertEmailBody(alertType, details, ipAddress);
-
-                var success = await SendEmailAsync(new[] { _emailConfig.DefaultRecipient }, subject, body, true, "SECURITY_ALERT");
-
-                if (success)
-                {
-                    _lastEmailSent = DateTime.Now;
-                    _logger.LogInformation("安全警报邮件发送成功：{AlertType}", alertType);
-                }
-
-                return success;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "发送安全警报邮件失败：{AlertType}", alertType);
+                _logger.LogWarning("Security alert email skipped due to cooldown");
                 return false;
             }
+
+            var emailContent = FormatSecurityAlert(subject, message, ipAddress);
+            return await SendEmailAsync(subject, emailContent);
         }
 
         public async Task<bool> SendSystemNotificationAsync(string subject, string message)
         {
-            try
+            if (!CheckCooldown("system_notification"))
             {
-                var fullSubject = $"📢 VacantRoomWeb 系统通知 - {subject}";
-                var body = GenerateSystemNotificationEmailBody(subject, message);
-
-                return await SendEmailAsync(new[] { _emailConfig.DefaultRecipient }, fullSubject, body, true, "SYSTEM_NOTIFICATION");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "发送系统通知邮件失败：{Subject}", subject);
+                _logger.LogWarning("System notification email skipped due to cooldown");
                 return false;
             }
-        }
 
-        public async Task<bool> SendCustomEmailAsync(string[] recipients, string subject, string body, bool isHtml = false)
-        {
-            try
-            {
-                return await SendEmailAsync(recipients, subject, body, isHtml, "CUSTOM");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "发送自定义邮件失败");
-                return false;
-            }
+            var emailContent = FormatSystemNotification(subject, message);
+            return await SendEmailAsync(subject, emailContent);
         }
 
         public async Task<bool> TestEmailServiceAsync()
         {
+            var subject = "VacantRoomWeb 邮件服务测试";
+            var message = FormatTestEmail();
+            return await SendEmailAsync(subject, message);
+        }
+
+        public void SendSecurityAlert(string subject, string message)
+        {
+            _ = Task.Run(async () => await SendSecurityAlertAsync(subject, message));
+        }
+
+        public void SendSystemNotification(string subject, string message)
+        {
+            _ = Task.Run(async () => await SendSystemNotificationAsync(subject, message));
+        }
+
+        private async Task<bool> SendEmailAsync(string subject, string content)
+        {
             try
             {
-                var subject = "VacantRoomWeb 邮件服务测试";
-                var body = GenerateTestEmailBody();
+                var apiUrl = _configuration["Email:NotifyHubAPI:BaseUrl"];
+                var apiKey = _configuration["Email:NotifyHubAPI:ApiKey"];
+                var recipient = _configuration["Email:DefaultRecipient"];
 
-                return await SendEmailAsync(new[] { _emailConfig.DefaultRecipient }, subject, body, true, "TEST");
+                if (string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(recipient))
+                {
+                    _logger.LogError("Email configuration is incomplete");
+                    return false;
+                }
+
+                var payload = new
+                {
+                    to = recipient,
+                    subject = subject,
+                    content = content,
+                    contentType = "html"
+                };
+
+                var jsonContent = JsonSerializer.Serialize(payload);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    httpContent.Headers.Add("X-API-Key", apiKey);
+                }
+
+                var maxRetries = _configuration.GetValue<int>("Email:MaxRetries", 3);
+
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
+                {
+                    try
+                    {
+                        var response = await _httpClient.PostAsync($"{apiUrl}/api/send", httpContent);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            _logger.LogInformation("Email sent successfully: {Subject}", subject);
+                            return true;
+                        }
+
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("Email send failed (attempt {Attempt}/{MaxRetries}): {StatusCode} - {Error}",
+                            attempt, maxRetries, response.StatusCode, errorContent);
+
+                        if (attempt < maxRetries)
+                        {
+                            await Task.Delay(1000 * attempt); // Exponential backoff
+                        }
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        _logger.LogWarning("HTTP request failed (attempt {Attempt}/{MaxRetries}): {Error}",
+                            attempt, maxRetries, ex.Message);
+
+                        if (attempt < maxRetries)
+                        {
+                            await Task.Delay(1000 * attempt);
+                        }
+                    }
+                }
+
+                return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "邮件服务测试失败");
+                _logger.LogError(ex, "Failed to send email: {Subject}", subject);
                 return false;
             }
         }
 
-        // 保持原有同步接口兼容性
-        public void SendSecurityAlert(string subject, string message)
+        private bool CheckCooldown(string emailType)
         {
-            // 异步调用但不等待结果，避免阻塞
-            Task.Run(async () =>
+            lock (_cooldownLock)
             {
-                try
+                var cooldownMinutes = _configuration.GetValue<int>("Email:CooldownMinutes", 5);
+                var now = DateTime.Now;
+
+                if (_lastSentTimes.TryGetValue(emailType, out var lastSent))
                 {
-                    await SendSecurityAlertAsync(subject, message);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "同步安全警报发送失败");
-                }
-            });
-        }
-
-        private async Task<bool> SendEmailAsync(string[] recipients, string subject, string body, bool isHtml, string category)
-        {
-            var retryCount = 0;
-            while (retryCount <= _emailConfig.MaxRetries)
-            {
-                try
-                {
-                    var requestData = new
+                    if (now.Subtract(lastSent).TotalMinutes < cooldownMinutes)
                     {
-                        to = recipients,
-                        subject = subject,
-                        body = body,
-                        category = category,
-                        isHtml = isHtml,
-                        priority = category == "SECURITY_ALERT" ? 2 : 1 // 安全警报设为高优先级
-                    };
-
-                    var jsonContent = JsonSerializer.Serialize(requestData);
-                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-                    var response = await _httpClient.PostAsync($"{_emailConfig.NotifyHubAPI.BaseUrl}/api/email/send", content);
-
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var responseContent = await response.Content.ReadAsStringAsync();
-                        _logger.LogInformation("邮件发送成功：{Subject}", subject);
-                        return true;
-                    }
-                    else
-                    {
-                        var errorContent = await response.Content.ReadAsStringAsync();
-                        _logger.LogWarning("邮件发送失败：{StatusCode} {Content}", response.StatusCode, errorContent);
-
-                        // 如果是客户端错误（4xx），不重试
-                        if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
-                catch (HttpRequestException ex)
-                {
-                    _logger.LogError(ex, "邮件API网络请求失败 (尝试 {Retry}/{MaxRetries})", retryCount + 1, _emailConfig.MaxRetries + 1);
-                }
-                catch (TaskCanceledException ex)
-                {
-                    _logger.LogError(ex, "邮件发送超时 (尝试 {Retry}/{MaxRetries})", retryCount + 1, _emailConfig.MaxRetries + 1);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "邮件发送异常 (尝试 {Retry}/{MaxRetries})", retryCount + 1, _emailConfig.MaxRetries + 1);
-                }
 
-                retryCount++;
-                if (retryCount <= _emailConfig.MaxRetries)
-                {
-                    // 指数退避重试
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, retryCount)));
-                }
+                _lastSentTimes[emailType] = now;
+                return true;
             }
-
-            return false;
         }
 
-        // 其他私有方法保持不变...
-        private string GenerateSecurityAlertEmailBody(string alertType, string details, string ipAddress)
+        private string FormatSecurityAlert(string subject, string message, string ipAddress)
         {
-            var serverTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            var serverName = Environment.MachineName;
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
             return $@"
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset='utf-8'>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }}
-        .container {{ max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ background-color: #dc3545; color: white; padding: 20px; text-align: center; }}
-        .content {{ padding: 30px; }}
-        .alert-box {{ background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 4px; margin: 20px 0; }}
-        .details {{ background-color: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace; }}
-        .footer {{ background-color: #6c757d; color: white; padding: 15px; text-align: center; font-size: 12px; }}
-        .priority {{ color: #dc3545; font-weight: bold; }}
-    </style>
+    <title>安全警报</title>
 </head>
-<body>
-    <div class='container'>
-        <div class='header'>
-            <h1>🚨 安全警报通知</h1>
-            <p class='priority'>优先级：高</p>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #dc3545; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>🚨 安全警报</h1>
         </div>
-        <div class='content'>
-            <h2>警报类型：{alertType}</h2>
-            
-            <div class='alert-box'>
-                <strong>⚠️ 检测到安全事件</strong><br>
-                系统自动检测到可疑活动，请立即检查并采取必要措施。
+        <div style='padding: 30px;'>
+            <h2 style='color: #dc3545; margin-top: 0;'>{subject}</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>{message}</p>
             </div>
-
-            <h3>事件详情：</h3>
-            <div class='details'>
-                {details}
-            </div>
-
             {(string.IsNullOrEmpty(ipAddress) ? "" : $@"
-            <h3>来源信息：</h3>
-            <div class='details'>
-                IP地址：{ipAddress}
+            <div style='margin: 20px 0;'>
+                <strong>IP地址：</strong> <code style='background-color: #f8f9fa; padding: 2px 6px; border-radius: 3px;'>{ipAddress}</code>
             </div>")}
-
-            <h3>系统信息：</h3>
-            <div class='details'>
-                服务器时间：{serverTime}<br>
-                服务器名称：{serverName}<br>
-                应用程序：VacantRoomWeb<br>
-                环境：{Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production"}
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>时间：</strong> {timestamp}<br>
+                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
+                <strong>服务器：</strong> {Environment.MachineName}
             </div>
-
-            <h3>建议措施：</h3>
-            <ul>
-                <li>立即登录管理后台检查详细日志</li>
-                <li>验证安全策略是否正常工作</li>
-                <li>如有必要，手动封禁可疑IP地址</li>
-                <li>监控后续活动</li>
-            </ul>
-
-            <p><strong>管理后台地址：</strong> <a href='https://admin.origami7023.cn/admin'>https://admin.origami7023.cn/admin</a></p>
         </div>
-        <div class='footer'>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
             此邮件由 VacantRoomWeb 安全监控系统自动发送<br>
-            发送时间：{serverTime}
+            请勿回复此邮件
         </div>
     </div>
 </body>
 </html>";
         }
 
-        private string GenerateSystemNotificationEmailBody(string subject, string message)
+        private string FormatSystemNotification(string subject, string message)
         {
-            var serverTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
             return $@"
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset='utf-8'>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }}
-        .container {{ max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ background-color: #17a2b8; color: white; padding: 20px; text-align: center; }}
-        .content {{ padding: 30px; }}
-        .message-box {{ background-color: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 4px; margin: 20px 0; }}
-        .footer {{ background-color: #6c757d; color: white; padding: 15px; text-align: center; font-size: 12px; }}
-    </style>
+    <title>系统通知</title>
 </head>
-<body>
-    <div class='container'>
-        <div class='header'>
-            <h1>📢 系统通知</h1>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #17a2b8; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>📢 系统通知</h1>
         </div>
-        <div class='content'>
-            <h2>{subject}</h2>
-            
-            <div class='message-box'>
-                {message}
+        <div style='padding: 30px;'>
+            <h2 style='color: #17a2b8; margin-top: 0;'>{subject}</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #17a2b8; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>{message}</p>
             </div>
-
-            <p><strong>发送时间：</strong> {serverTime}</p>
-            <p><strong>系统：</strong> VacantRoomWeb</p>
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>时间：</strong> {timestamp}<br>
+                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
+                <strong>服务器：</strong> {Environment.MachineName}
+            </div>
         </div>
-        <div class='footer'>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
             此邮件由 VacantRoomWeb 系统自动发送<br>
-            发送时间：{serverTime}
+            请勿回复此邮件
         </div>
     </div>
 </body>
 </html>";
         }
 
-        private string GenerateTestEmailBody()
+        private string FormatTestEmail()
         {
-            var serverTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
             return $@"
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset='utf-8'>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }}
-        .container {{ max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ background-color: #28a745; color: white; padding: 20px; text-align: center; }}
-        .content {{ padding: 30px; }}
-        .success-box {{ background-color: #d4edda; border: 1px solid #c3e6cb; padding: 15px; border-radius: 4px; margin: 20px 0; }}
-        .footer {{ background-color: #6c757d; color: white; padding: 15px; text-align: center; font-size: 12px; }}
-    </style>
+    <title>邮件服务测试</title>
 </head>
-<body>
-    <div class='container'>
-        <div class='header'>
-            <h1>✅ 邮件服务测试</h1>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #28a745; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>✅ 邮件服务测试</h1>
         </div>
-        <div class='content'>
-            <div class='success-box'>
-                <strong>邮件服务工作正常！</strong><br>
-                如果您收到这封邮件，说明 VacantRoomWeb 的邮件通知系统已成功配置并正常工作。
+        <div style='padding: 30px;'>
+            <h2 style='color: #28a745; margin-top: 0;'>测试成功</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>VacantRoomWeb 邮件通知服务运行正常。</p>
+                <p style='margin: 10px 0 0 0; line-height: 1.6;'>如果您收到了这封邮件，说明邮件发送功能已正确配置并可以正常工作。</p>
             </div>
-
-            <h3>测试信息：</h3>
-            <ul>
-                <li><strong>测试时间：</strong> {serverTime}</li>
-                <li><strong>API地址：</strong> {_emailConfig.NotifyHubAPI.BaseUrl}</li>
-                <li><strong>收件人：</strong> {_emailConfig.DefaultRecipient}</li>
-                <li><strong>服务器：</strong> {Environment.MachineName}</li>
-            </ul>
-
-            <p>现在您可以确信安全警报和系统通知将正确发送。</p>
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>测试时间：</strong> {timestamp}<br>
+                <strong>系统版本：</strong> VacantRoomWeb v1.0.0<br>
+                <strong>服务器：</strong> {Environment.MachineName}<br>
+                <strong>运行环境：</strong> .NET 8 / Blazor Server
+            </div>
         </div>
-        <div class='footer'>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
             此邮件由 VacantRoomWeb 邮件服务测试功能发送<br>
-            发送时间：{serverTime}
+            请勿回复此邮件
         </div>
     </div>
 </body>

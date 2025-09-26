@@ -1,36 +1,20 @@
-﻿// EnhancedLoggingService.cs - 修复命名冲突版本
+﻿// Services/FileBasedLoggingService.cs
 using System.Collections.Concurrent;
 using System.Text;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Services
 {
-    // 确保 LogEntry 在 VacantRoomWeb 命名空间中，避免冲突
-    public class LogEntry
-    {
-        public DateTime Timestamp { get; set; }
-        public string IP { get; set; } = "";
-        public string Action { get; set; } = "";
-        public string Details { get; set; } = "";
-        public string UserAgent { get; set; } = "";
-        public string RequestPath { get; set; } = "";
-    }
-
-    public class EnhancedLoggingService : IDisposable
+    public class FileBasedLoggingService : IDisposable
     {
         private readonly string _logDirectory;
         private readonly object _fileLock = new();
-        private readonly ILogger<EnhancedLoggingService> _logger;
+        private readonly ILogger<FileBasedLoggingService> _logger;
 
-        // 缓存当日日志文件路径和日期，避免重复计算
+        // 缓存今日日志文件路径，避免重复计算
         private string _currentLogFilePath;
         private DateTime _currentLogDate;
 
-        // 可选的小量内存缓存，用于提升管理后台显示性能（可配置）
-        private readonly bool _enableMemoryCache = false;
-        private readonly ConcurrentQueue<LogEntry> _memoryCache = new();
-        private const int MaxMemoryCacheSize = 100; // 只缓存最近100条
-
-        public EnhancedLoggingService(ILogger<EnhancedLoggingService> logger = null)
+        public FileBasedLoggingService(ILogger<FileBasedLoggingService> logger = null)
         {
             _logger = logger;
             _logDirectory = Path.Combine(AppContext.BaseDirectory, "Logs");
@@ -52,14 +36,7 @@ namespace VacantRoomWeb
                 RequestPath = requestPath
             };
 
-            // 写入文件（主要存储）
             WriteToFile(logEntry);
-
-            // 可选：加入内存缓存以提升性能
-            if (_enableMemoryCache)
-            {
-                AddToMemoryCache(logEntry);
-            }
         }
 
         private void WriteToFile(LogEntry entry)
@@ -87,17 +64,6 @@ namespace VacantRoomWeb
             }
         }
 
-        private void AddToMemoryCache(LogEntry entry)
-        {
-            _memoryCache.Enqueue(entry);
-
-            // 保持内存缓存大小
-            while (_memoryCache.Count > MaxMemoryCacheSize)
-            {
-                _memoryCache.TryDequeue(out _);
-            }
-        }
-
         private void UpdateCurrentLogFilePath()
         {
             _currentLogDate = DateTime.Today;
@@ -112,13 +78,6 @@ namespace VacantRoomWeb
 
         public List<LogEntry> GetRecentLogs(int count = 100)
         {
-            // 如果启用了内存缓存且请求数量较小，优先使用内存缓存
-            if (_enableMemoryCache && count <= MaxMemoryCacheSize)
-            {
-                return _memoryCache.TakeLast(count).OrderByDescending(l => l.Timestamp).ToList();
-            }
-
-            // 否则从文件读取
             var logs = new List<LogEntry>();
             var today = DateTime.Today;
 
@@ -156,18 +115,23 @@ namespace VacantRoomWeb
             {
                 try
                 {
-                    // 对于大文件，使用流式读取而不是一次性读取所有行
+                    var lines = File.ReadAllLines(filePath, Encoding.UTF8);
+
                     if (fromEnd)
                     {
-                        // 从文件末尾反向读取
-                        logs = ReadLogsFromEndOfFile(filePath, maxCount);
+                        // 从文件末尾开始读取
+                        for (int i = lines.Length - 1; i >= 0 && logs.Count < maxCount; i--)
+                        {
+                            if (TryParseLogLine(lines[i], out var logEntry))
+                            {
+                                logs.Add(logEntry);
+                            }
+                        }
                     }
                     else
                     {
                         // 从文件开头读取
-                        using var reader = new StreamReader(filePath, Encoding.UTF8);
-                        string line;
-                        while ((line = reader.ReadLine()) != null && logs.Count < maxCount)
+                        foreach (var line in lines)
                         {
                             if (TryParseLogLine(line, out var logEntry))
                             {
@@ -180,32 +144,6 @@ namespace VacantRoomWeb
                 {
                     _logger?.LogError(ex, "读取日志文件失败: {FilePath}", filePath);
                 }
-            }
-
-            return logs;
-        }
-
-        private List<LogEntry> ReadLogsFromEndOfFile(string filePath, int maxCount)
-        {
-            var logs = new List<LogEntry>();
-
-            try
-            {
-                // 简单实现：读取所有行然后取后面的
-                // 对于更高效的实现，可以使用文件流从末尾开始读取
-                var lines = File.ReadAllLines(filePath, Encoding.UTF8);
-
-                for (int i = lines.Length - 1; i >= 0 && logs.Count < maxCount; i--)
-                {
-                    if (TryParseLogLine(lines[i], out var logEntry))
-                    {
-                        logs.Add(logEntry);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "从文件末尾读取日志失败: {FilePath}", filePath);
             }
 
             return logs;
@@ -225,16 +163,14 @@ namespace VacantRoomWeb
                 if (timestampEnd == -1) return false;
 
                 var timestampStr = line.Substring(1, timestampEnd - 1);
-                if (!DateTime.TryParseExact(timestampStr, "yyyy-MM-dd HH:mm:ss.fff", null,
-                    System.Globalization.DateTimeStyles.None, out var timestamp))
+                if (!DateTime.TryParseExact(timestampStr, "yyyy-MM-dd HH:mm:ss.fff", null, System.Globalization.DateTimeStyles.None, out var timestamp))
                     return false;
 
                 logEntry.Timestamp = timestamp;
 
                 // 解析其余字段
                 var remainingLine = line.Substring(timestampEnd + 1).Trim();
-                var parts = remainingLine.Split(new[] { " IP:", " ACTION:", " PATH:", " DETAILS:", " UA:" },
-                    StringSplitOptions.None);
+                var parts = remainingLine.Split(new[] { " IP:", " ACTION:", " PATH:", " DETAILS:", " UA:" }, StringSplitOptions.None);
 
                 if (parts.Length >= 5)
                 {
@@ -272,8 +208,7 @@ namespace VacantRoomWeb
                 return Directory.GetFiles(_logDirectory, "access-*.log")
                     .Select(f => Path.GetFileName(f))
                     .Select(f => f.Replace("access-", "").Replace(".log", ""))
-                    .Where(dateStr => DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null,
-                        System.Globalization.DateTimeStyles.None, out _))
+                    .Where(dateStr => DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
                     .OrderByDescending(d => d)
                     .ToList();
             }
@@ -286,17 +221,11 @@ namespace VacantRoomWeb
 
         public void ClearRecentLogs()
         {
+            // 对于文件系统，这个方法可以清空今日的日志文件
             lock (_fileLock)
             {
                 try
                 {
-                    // 清空内存缓存
-                    if (_enableMemoryCache)
-                    {
-                        while (_memoryCache.TryDequeue(out _)) { }
-                    }
-
-                    // 清空今日的日志文件
                     if (File.Exists(_currentLogFilePath))
                     {
                         File.WriteAllText(_currentLogFilePath, "", Encoding.UTF8);
@@ -305,7 +234,7 @@ namespace VacantRoomWeb
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogError(ex, "清空日志失败: {FilePath}", _currentLogFilePath);
+                    _logger?.LogError(ex, "清空日志文件失败: {FilePath}", _currentLogFilePath);
                 }
             }
         }
@@ -317,7 +246,7 @@ namespace VacantRoomWeb
 
             try
             {
-                // 今日日志统计（从文件读取）
+                // 今日日志统计
                 var todayLogs = GetLogsByDate(today);
                 var todayActionGroups = todayLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
                 var todayIpCount = todayLogs.Select(l => l.IP).Distinct().Count();
@@ -327,25 +256,11 @@ namespace VacantRoomWeb
                 stats["TodaySecurityEvents"] = todayActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
                 stats["TodayAdminEvents"] = todayActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
 
-                // 内存统计
-                if (_enableMemoryCache)
-                {
-                    var memoryLogs = _memoryCache.ToList();
-                    var memoryActionGroups = memoryLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
-                    var memoryIpCount = memoryLogs.Select(l => l.IP).Distinct().Count();
-
-                    stats["MemoryLogs"] = memoryLogs.Count;
-                    stats["MemoryUniqueIPs"] = memoryIpCount;
-                    stats["MemorySecurityEvents"] = memoryActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
-                    stats["MemoryAdminEvents"] = memoryActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
-                }
-                else
-                {
-                    stats["MemoryLogs"] = 0;
-                    stats["MemoryUniqueIPs"] = 0;
-                    stats["MemorySecurityEvents"] = 0;
-                    stats["MemoryAdminEvents"] = 0;
-                }
+                // 内存日志统计（始终为0，因为不再使用内存）
+                stats["MemoryLogs"] = 0;
+                stats["MemoryUniqueIPs"] = 0;
+                stats["MemorySecurityEvents"] = 0;
+                stats["MemoryAdminEvents"] = 0;
 
                 // 今日日志文件大小
                 var todayFilePath = GetLogFilePath(today);
@@ -360,7 +275,7 @@ namespace VacantRoomWeb
                 }
 
                 // 调试信息
-                stats["DebugInfo"] = $"文件日志: {todayLogs.Count}, 内存缓存: {(_enableMemoryCache ? _memoryCache.Count : 0)}";
+                stats["DebugInfo"] = $"今日文件日志: {todayLogs.Count}";
                 stats["DebugLogDirectory"] = _logDirectory;
                 stats["DebugCurrentTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                 stats["DebugTodayDate"] = today.ToString("yyyy-MM-dd");
@@ -378,19 +293,6 @@ namespace VacantRoomWeb
             return stats;
         }
 
-        public int GetTodayLogCount()
-        {
-            try
-            {
-                var todayLogs = GetLogsByDate(DateTime.Today);
-                return todayLogs.Count;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
         public void CleanupOldLogs(int daysToKeep = 30)
         {
             try
@@ -403,8 +305,7 @@ namespace VacantRoomWeb
                     var fileName = Path.GetFileNameWithoutExtension(file);
                     var dateStr = fileName.Replace("access-", "");
 
-                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null,
-                        System.Globalization.DateTimeStyles.None, out var fileDate))
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
                     {
                         if (fileDate < cutoffDate)
                         {
@@ -433,8 +334,7 @@ namespace VacantRoomWeb
                     var fileName = Path.GetFileNameWithoutExtension(file);
                     var dateStr = fileName.Replace("access-", "");
 
-                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null,
-                        System.Globalization.DateTimeStyles.None, out var fileDate))
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
                     {
                         var fileInfo = new FileInfo(file);
                         var lineCount = CountLinesInFile(file);
@@ -457,13 +357,7 @@ namespace VacantRoomWeb
         {
             try
             {
-                int lineCount = 0;
-                using var reader = new StreamReader(filePath, Encoding.UTF8);
-                while (reader.ReadLine() != null)
-                {
-                    lineCount++;
-                }
-                return lineCount;
+                return File.ReadAllLines(filePath).Length;
             }
             catch
             {
@@ -471,19 +365,20 @@ namespace VacantRoomWeb
             }
         }
 
-        public void ForceRefreshStats()
-        {
-            // 对于基于文件的系统，统计数据总是最新的，无需特殊刷新操作
-            // 如果启用了内存缓存，可以选择性地重新计算缓存统计
-        }
-
         public void Dispose()
         {
-            // 清理资源
-            if (_enableMemoryCache)
-            {
-                while (_memoryCache.TryDequeue(out _)) { }
-            }
+            // 文件系统不需要特殊的释放操作
         }
+    }
+
+    // LogEntry 保持不变
+    public class LogEntry
+    {
+        public DateTime Timestamp { get; set; }
+        public string IP { get; set; } = "";
+        public string Action { get; set; } = "";
+        public string Details { get; set; } = "";
+        public string UserAgent { get; set; } = "";
+        public string RequestPath { get; set; } = "";
     }
 }

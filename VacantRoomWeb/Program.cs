@@ -28,9 +28,13 @@ builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 // Register new security and logging services
 builder.Services.AddSingleton<EnhancedLoggingService>();
+builder.Services.AddSingleton<IStartupLoggingService, StartupLoggingService>();
+builder.Services.AddSingleton<ApplicationStartupService>(provider =>
+    new ApplicationStartupService(provider.GetRequiredService<IStartupLoggingService>()));
+
+// Register security and other services
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<AdminAuthService>();
-builder.Services.AddSingleton<ApplicationStartupService>();
 
 // Register notification service for component communication
 builder.Services.AddSingleton<NotificationService>();
@@ -40,6 +44,10 @@ builder.Services.AddSingleton<VacantRoomService>();
 builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
 
 var app = builder.Build();
+
+// 记录应用程序启动
+var startupService = app.Services.GetRequiredService<IStartupLoggingService>();
+startupService.RecordStart();
 
 // Configure the HTTP request pipeline
 if (!app.Environment.IsDevelopment())

@@ -1,5 +1,6 @@
-﻿// SecurityService.cs - 更新部分
+﻿// SecurityService.cs - 修复版本
 using System.Collections.Concurrent;
+using VacantRoomWeb.Services; // 添加这行来引用邮件服务
 
 namespace VacantRoomWeb
 {

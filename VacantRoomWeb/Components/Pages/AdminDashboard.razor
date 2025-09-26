@@ -9,6 +9,7 @@
 @inject ApplicationStartupService StartupService
 @inject IEmailService EmailService
 @inject IConfiguration Configuration
+@using VacantRoomWeb.Services
 
 <PageTitle>管理后台</PageTitle>
 
@@ -62,7 +63,7 @@ else
                 <div class="stat-content">
                     <h3>@LogStats["TodayLogs"]</h3>
                     <p>今日日志总数</p>
-                    <small>内存: @LogStats["MemoryLogs"] 条</small>
+                    <small>文件存储</small>
                 </div>
             </div>
         </div>
@@ -104,7 +105,7 @@ else
                         <h3>最近访问日志</h3>
                         <div class="header-buttons">
                             <button @onclick="RefreshLogs" class="btn btn-primary btn-sm">🔄 刷新</button>
-                            <button @onclick="ClearLogs" class="btn btn-warning btn-sm">🗑️ 清空内存日志</button>
+                            <button @onclick="ClearLogs" class="btn btn-warning btn-sm">🗑️ 清空今日缓存</button>
                         </div>
                     </div>
 
@@ -191,13 +192,13 @@ else
                         </div>
 
                         <div class="info-card">
-                            <h4>日志统计</h4>
+                            <h4>日志系统</h4>
                             <p><strong>今日日志总数：</strong> @LogStats.GetValueOrDefault("TodayLogs", "未知")</p>
-                            <p><strong>内存日志数：</strong> @LogStats.GetValueOrDefault("MemoryLogs", "未知")</p>
+                            <p><strong>日志文件大小：</strong> @LogStats.GetValueOrDefault("TodayLogFileSize", "未知")</p>
                             <p><strong>今日唯一IP：</strong> @LogStats.GetValueOrDefault("TodayUniqueIPs", "未知")</p>
                             <p><strong>今日安全事件：</strong> @LogStats.GetValueOrDefault("TodaySecurityEvents", "未知")</p>
                             <p><strong>今日管理事件：</strong> @LogStats.GetValueOrDefault("TodayAdminEvents", "未知")</p>
-                            <p><strong>日志文件大小：</strong> @LogStats.GetValueOrDefault("TodayLogFileSize", "未知")</p>
+                            <p><strong>存储方式：</strong> 按日分片文件存储</p>
                         </div>
                     </div>
                 </div>
@@ -226,7 +227,7 @@ else
                         <div class="action-group">
                             <h4>日志维护</h4>
                             <div class="maintenance-controls">
-                                <button @onclick="ClearLogs" class="btn btn-warning">清空内存日志</button>
+                                <button @onclick="ClearLogs" class="btn btn-warning">清空今日缓存</button>
                                 <button @onclick="CleanupOldLogs" class="btn btn-danger">清理30天前日志文件</button>
                                 <button @onclick="ExportLogs" class="btn btn-info">导出当日日志</button>
                             </div>
@@ -976,13 +977,12 @@ else
     }
 </style>
 
-
 @code {
     private bool IsAuthenticated = false;
     private int ActiveTab = 0;
     private int CurrentConnections = 0;
-    private List<LogEntry> RecentLogs = new();
-    private List<LogEntry> FilteredLogs = new();
+    private List<VacantRoomWeb.LogEntry> RecentLogs = new(); // 明确指定命名空间
+    private List<VacantRoomWeb.LogEntry> FilteredLogs = new(); // 明确指定命名空间
     private List<SecurityEvent> SecurityEvents = new();
     private Dictionary<string, object> SecurityStats = new();
     private Dictionary<string, object> LogStats = new();
@@ -1013,191 +1013,80 @@ else
         }
 
         await LoadDashboardData();
-        await LoadEmailData();
 
-        // 设置定时刷新 - 每30秒自动刷新统计数据
-        _refreshTimer = new Timer(async _ =>
-        {
-            await InvokeAsync(async () =>
-            {
-                LogStats = LoggingService.GetLogStats();
-                SecurityStats = SecurityService.GetSecurityStats();
-                CurrentConnections = ConnectionService.GetCount();
-                await LoadEmailData();
-                StateHasChanged();
-            });
-        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
-    }
-
-    public void Dispose()
-    {
-        _refreshTimer?.Dispose();
+        // 设置定时刷新
+        _refreshTimer = new Timer(async _ => await InvokeAsync(RefreshData), null, TimeSpan.Zero, TimeSpan.FromSeconds(30));
     }
 
     private async Task LoadDashboardData()
     {
-        CurrentConnections = ConnectionService.GetCount();
-        RecentLogs = LoggingService.GetRecentLogs(100);
-        FilteredLogs = RecentLogs;
-        SecurityEvents = SecurityService.GetRecentSecurityEvents(30);
-        SecurityStats = SecurityService.GetSecurityStats();
-        LogStats = LoggingService.GetLogStats();
-        AvailableLogDates = LoggingService.GetAvailableLogDates();
-        LogFileInfo = LoggingService.GetLogFileInfo();
-
-        StateHasChanged();
-    }
-
-    // 加载邮件相关数据
-    private async Task LoadEmailData()
-    {
-        EmailStats = GetEmailStats();
-        EmailConfig = GetEmailConfig();
-        EmailSettings = GetEmailSettings();
-    }
-
-    // 获取邮件统计信息
-    private Dictionary<string, object> GetEmailStats()
-    {
-        var recentLogs = LoggingService.GetRecentLogs(1000);
-        var emailLogs = recentLogs.Where(l => l.Action.Contains("EMAIL") || l.Action.Contains("ALERT")).ToList();
-
-        var totalSent = emailLogs.Count;
-        var successCount = emailLogs.Count(l => !l.Details.Contains("失败") && !l.Details.Contains("error"));
-        var successRate = totalSent > 0 ? (successCount * 100 / totalSent) : 100;
-
-        var lastSent = emailLogs.OrderByDescending(l => l.Timestamp).FirstOrDefault()?.Timestamp.ToString("MM-dd HH:mm") ?? "未发送";
-
-        return new Dictionary<string, object>
-        {
-            ["TotalSent"] = totalSent,
-            ["SuccessRate"] = successRate,
-            ["LastSent"] = lastSent
-        };
-    }
-
-    // 获取邮件配置信息
-    private Dictionary<string, string> GetEmailConfig()
-    {
-        var apiUrl = Configuration["Email:NotifyHubAPI:BaseUrl"] ?? "未配置";
-        var recipient = Configuration["Email:DefaultRecipient"] ?? "未配置";
-
-        return new Dictionary<string, string>
-        {
-            ["ApiUrl"] = apiUrl,
-            ["Recipient"] = recipient,
-            ["Cooldown"] = "5",
-            ["ServiceStatus"] = "正常"
-        };
-    }
-
-    // 获取邮件通知设置
-    private EmailNotificationSettings GetEmailSettings()
-    {
-        return new EmailNotificationSettings
-        {
-            EnableDDoSAlerts = true,
-            EnableBruteForceAlerts = true,
-            EnableSystemLockdownAlerts = true,
-            EnableIPBanAlerts = true
-        };
-    }
-
-    // 测试邮件服务
-    private async Task TestEmailService()
-    {
-        IsEmailTesting = true;
-        EmailTestResult = "";
-        StateHasChanged();
-
         try
         {
-            var success = await EmailService.TestEmailServiceAsync();
+            // 加载连接数
+            CurrentConnections = ConnectionService.GetCount();
 
-            if (success)
-            {
-                EmailTestResult = "✅ 邮件服务测试成功！测试邮件已发送到 " + (Configuration["Email:DefaultRecipient"] ?? "未知邮箱");
-                EmailTestSuccess = true;
-            }
-            else
-            {
-                EmailTestResult = "❌ 邮件服务测试失败，请检查配置和网络连接";
-                EmailTestSuccess = false;
-            }
-        }
-        catch (Exception ex)
-        {
-            EmailTestResult = $"❌ 邮件服务测试异常：{ex.Message}";
-            EmailTestSuccess = false;
-        }
-        finally
-        {
-            IsEmailTesting = false;
+            // 加载日志数据
+            RecentLogs = LoggingService.GetRecentLogs(100);
+            FilteredLogs = RecentLogs;
+
+            // 加载安全数据
+            SecurityEvents = SecurityService.GetRecentSecurityEvents(50);
+            SecurityStats = SecurityService.GetSecurityStats();
+
+            // 加载日志统计
+            LogStats = LoggingService.GetLogStats();
+
+            // 加载日志文件信息
+            AvailableLogDates = LoggingService.GetAvailableLogDates();
+            LogFileInfo = LoggingService.GetLogFileInfo();
+
+            // 加载邮件统计
+            await LoadEmailStats();
+
             StateHasChanged();
         }
+        catch (Exception ex)
+        {
+            // 错误处理
+            await Console.Out.WriteLineAsync($"Error loading dashboard data: {ex.Message}");
+        }
     }
 
-    // 刷新邮件状态
-    private async Task RefreshEmailStatus()
-    {
-        await LoadEmailData();
-        StateHasChanged();
-    }
-
-    // 保存邮件设置
-    private async Task SaveEmailSettings()
+    private async Task LoadEmailStats()
     {
         try
         {
-            await JSRuntime.InvokeVoidAsync("alert", "邮件设置已保存");
+            // 这里需要实现邮件统计逻辑
+            EmailStats = new Dictionary<string, object>
+            {
+                ["TotalSent"] = "N/A",
+                ["SuccessRate"] = "N/A",
+                ["LastSent"] = "未发送"
+            };
+
+            EmailConfig = new Dictionary<string, string>
+            {
+                ["ApiUrl"] = Configuration["Email:NotifyHubAPI:BaseUrl"] ?? "未配置",
+                ["Recipient"] = Configuration["Email:DefaultRecipient"] ?? "未配置",
+                ["Cooldown"] = Configuration["Email:CooldownMinutes"] ?? "5",
+                ["ServiceStatus"] = "正常"
+            };
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("alert", $"保存失败：{ex.Message}");
+            EmailStats["Error"] = ex.Message;
         }
     }
 
-    // 发送手动邮件
-    private async Task SendManualEmail()
+    private async Task RefreshData()
     {
-        if (string.IsNullOrEmpty(ManualEmailSubject) || string.IsNullOrEmpty(ManualEmailContent))
-        {
-            await JSRuntime.InvokeVoidAsync("alert", "请填写邮件主题和内容");
-            return;
-        }
-
-        IsEmailTesting = true;
-        StateHasChanged();
-
-        try
-        {
-            var success = await EmailService.SendSystemNotificationAsync(ManualEmailSubject, ManualEmailContent);
-
-            if (success)
-            {
-                await JSRuntime.InvokeVoidAsync("alert", "邮件发送成功！");
-                ManualEmailSubject = "";
-                ManualEmailContent = "";
-            }
-            else
-            {
-                await JSRuntime.InvokeVoidAsync("alert", "邮件发送失败，请检查配置");
-            }
-        }
-        catch (Exception ex)
-        {
-            await JSRuntime.InvokeVoidAsync("alert", $"邮件发送异常：{ex.Message}");
-        }
-        finally
-        {
-            IsEmailTesting = false;
-            StateHasChanged();
-        }
+        await LoadDashboardData();
     }
 
     private void SetActiveTab(int tabIndex)
     {
         ActiveTab = tabIndex;
+        StateHasChanged();
     }
 
     private async Task RefreshLogs()
@@ -1209,16 +1098,21 @@ else
 
     private async Task RefreshSecurity()
     {
-        SecurityEvents = SecurityService.GetRecentSecurityEvents(30);
+        SecurityEvents = SecurityService.GetRecentSecurityEvents(50);
         SecurityStats = SecurityService.GetSecurityStats();
         StateHasChanged();
     }
 
-    private async Task RefreshStats()
+    private async Task RefreshSystemInfo()
     {
         LogStats = LoggingService.GetLogStats();
-        SecurityStats = SecurityService.GetSecurityStats();
         CurrentConnections = ConnectionService.GetCount();
+        StateHasChanged();
+    }
+
+    private async Task RefreshEmailStatus()
+    {
+        await LoadEmailStats();
         StateHasChanged();
     }
 
@@ -1231,19 +1125,95 @@ else
     private async Task CleanupOldLogs()
     {
         LoggingService.CleanupOldLogs(30);
-        AvailableLogDates = LoggingService.GetAvailableLogDates();
+        LogFileInfo = LoggingService.GetLogFileInfo();
         StateHasChanged();
     }
 
     private async Task ExportLogs()
     {
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
-        await JSRuntime.InvokeVoidAsync("alert", $"导出功能开发中，将导出 {today} 的日志文件");
+        // 导出日志逻辑
+        await Task.CompletedTask;
     }
 
     private async Task ViewLogFile(string date)
     {
-        await JSRuntime.InvokeVoidAsync("alert", $"查看功能开发中，将显示 {date} 的日志内容");
+        // 查看日志文件逻辑
+        await Task.CompletedTask;
+    }
+
+    private async Task TestEmailService()
+    {
+        IsEmailTesting = true;
+        EmailTestResult = "";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.TestEmailServiceAsync();
+            EmailTestSuccess = success;
+            EmailTestResult = success ? "邮件发送成功！" : "邮件发送失败，请检查配置。";
+        }
+        catch (Exception ex)
+        {
+            EmailTestSuccess = false;
+            EmailTestResult = $"测试过程中发生错误：{ex.Message}";
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveEmailSettings()
+    {
+        // 保存邮件设置逻辑
+        await Task.CompletedTask;
+        StateHasChanged();
+    }
+
+    private async Task SendManualEmail()
+    {
+        if (string.IsNullOrEmpty(ManualEmailSubject)) return;
+
+        IsEmailTesting = true;
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSystemNotificationAsync(ManualEmailSubject, ManualEmailContent);
+            EmailTestSuccess = success;
+            EmailTestResult = success ? "邮件发送成功！" : "邮件发送失败。";
+
+            if (success)
+            {
+                ManualEmailSubject = "";
+                ManualEmailContent = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            EmailTestSuccess = false;
+            EmailTestResult = $"发送过程中发生错误：{ex.Message}";
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleLogout()
+    {
+        try
+        {
+            await AuthService.SignOutAsync(JSRuntime);
+            Navigation.NavigateTo("/admin/login", true);
+        }
+        catch (Exception)
+        {
+            Navigation.NavigateTo("/admin/login", true);
+        }
     }
 
     private void ApplyFilter()
@@ -1259,45 +1229,12 @@ else
         StateHasChanged();
     }
 
-    private async Task HandleLogout()
-    {
-        try
-        {
-            await AuthService.SignOutAsync(JSRuntime);
-            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
-        }
-        catch (Exception ex)
-        {
-            await JSRuntime.InvokeVoidAsync("console.error", $"Logout error: {ex.Message}");
-            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
-        }
-    }
-
     private string GetLogRowClass(string action)
     {
         if (action.StartsWith("SECURITY_")) return "security-row";
-        if (action.StartsWith("ERROR_")) return "error-row";
+        if (action.Contains("ERROR") || action.Contains("FAILED")) return "error-row";
         if (action == "ACCESS") return "access-row";
         return "";
-    }
-
-    private string GetSecurityEventClass(string eventType)
-    {
-        if (eventType.Contains("BRUTE_FORCE") || eventType.Contains("DDOS") || eventType.Contains("BANNED"))
-            return "danger";
-        return "warning";
-    }
-
-    private string TruncateUserAgent(string userAgent)
-    {
-        if (string.IsNullOrEmpty(userAgent)) return "N/A";
-        return userAgent.Length > 30 ? userAgent.Substring(0, 30) + "..." : userAgent;
-    }
-
-    private string GetUptime()
-    {
-        var uptime = DateTime.Now - StartTime;
-        return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
     }
 
     private string FormatActionType(string action)
@@ -1305,38 +1242,32 @@ else
         return action switch
         {
             "ACCESS" => "页面访问",
-            "BLAZOR_CONNECTION_UP" => "连接建立",
-            "BLAZOR_CONNECTION_DOWN" => "连接断开",
-            "LOCALHOST_ADMIN_ACCESS" => "本地管理访问",
-            "ADMIN_SUBDOMAIN_ACCESS" => "管理域名访问",
-            "ADMIN_SUBDOMAIN_REDIRECT" => "管理域名重定向",
-            "ADMIN_PATH_REWRITE" => "路径重写",
-            "ADMIN_ACCESS_BLOCKED" => "管理访问被阻止",
-            "ACCESS_DENIED_BANNED" => "访问被拒绝(IP封禁)",
-            "ACCESS_DENIED_LOCKDOWN" => "访问被拒绝(系统锁定)",
-            "SECURITY_DDOS_DETECTED" => "检测到DDoS攻击",
-            "SECURITY_BRUTE_FORCE_DETECTED" => "检测到暴力破解",
-            "SECURITY_IP_BANNED" => "IP地址被封禁",
-            "SECURITY_ADMIN_LOCKDOWN" => "管理面板锁定",
             "ADMIN_LOGIN_SUCCESS" => "管理员登录成功",
             "ADMIN_LOGIN_FAILED" => "管理员登录失败",
-            "ADMIN_LOGOUT" => "管理员退出登录",
-            "ADMIN_AUTH_COOKIE_SET" => "设置认证Cookie",
-            "EMAIL_ALERT_TRIGGERED" => "邮件警报触发",
+            "BLAZOR_CONNECTION_UP" => "连接建立",
+            "BLAZOR_CONNECTION_DOWN" => "连接断开",
             "QUERY_VACANT_ROOMS" => "查询空教室",
-            "QUERY_ROOM_USAGE" => "查询教室使用情况",
-            "QUERY_RESULT" => "查询结果",
-            "ERROR_FILE_NOT_FOUND" => "文件未找到错误",
+            "QUERY_ROOM_USAGE" => "查询教室使用",
+            var s when s.StartsWith("SECURITY_") => "安全事件",
             _ => action
         };
     }
 
-    private async Task RefreshSystemInfo()
+    private string TruncateUserAgent(string userAgent)
     {
-        LogStats = LoggingService.GetLogStats();
-        SecurityStats = SecurityService.GetSecurityStats();
-        CurrentConnections = ConnectionService.GetCount();
-        AvailableLogDates = LoggingService.GetAvailableLogDates();
-        StateHasChanged();
+        if (string.IsNullOrEmpty(userAgent)) return "";
+        return userAgent.Length > 50 ? userAgent.Substring(0, 50) + "..." : userAgent;
+    }
+
+    private string GetSecurityEventClass(string eventType)
+    {
+        if (eventType.Contains("BRUTE_FORCE") || eventType.Contains("DDOS")) return "danger";
+        if (eventType.Contains("WARNING")) return "warning";
+        return "danger";
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
     }
 }

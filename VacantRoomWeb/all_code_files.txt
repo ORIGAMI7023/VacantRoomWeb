@@ -1,5 +1,5 @@
 ================================================================================
-打包时间: 2025年09月23日 15:46
+打包时间: 2025年09月26日 23:07
 VACANTROOM WEB PROJECT - ALL CODE FILES
 ================================================================================
 
@@ -7,33 +7,28 @@ VACANTROOM WEB PROJECT - ALL CODE FILES
 ============================================================
 FILE: AdminAuthService.cs
 ============================================================
-﻿using System.Security.Cryptography;
+﻿// AdminAuthService.cs - 更新版本
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.JSInterop;
+using VacantRoomWeb.Services;
 
 namespace VacantRoomWeb
 {
-    public class AdminConfig
-    {
-        public string Username { get; set; } = "";
-        public string PasswordHash { get; set; } = "";
-        public string Salt { get; set; } = "";
-    }
-
     public class AdminAuthService
     {
-        private readonly IConfiguration _configuration;
+        private readonly IConfigurationService _configService;
         private readonly SecurityService _securityService;
         private readonly EnhancedLoggingService _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
         public AdminAuthService(
-            IConfiguration configuration,
+            IConfigurationService configService,
             SecurityService securityService,
             EnhancedLoggingService logger,
             IHttpContextAccessor httpContextAccessor)
         {
-            _configuration = configuration;
+            _configService = configService;
             _securityService = securityService;
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
@@ -44,9 +39,9 @@ namespace VacantRoomWeb
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
             var userAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString() ?? "";
 
-            var adminConfig = _configuration.GetSection("AdminConfig").Get<AdminConfig>();
+            var adminConfig = _configService.GetAdminConfig();
 
-            if (adminConfig == null || string.IsNullOrEmpty(adminConfig.Username))
+            if (string.IsNullOrEmpty(adminConfig.Username))
             {
                 _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration not found", userAgent);
                 return false;
@@ -102,8 +97,6 @@ namespace VacantRoomWeb
             }
             catch (InvalidOperationException)
             {
-                // Response has already started, can't set cookie through HttpContext
-                // This will be handled by the caller using JavaScript
                 var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
                 _logger.LogAccess(ip, "ADMIN_AUTH_COOKIE_SET_FAILED", "Response already started");
                 throw;
@@ -130,19 +123,15 @@ namespace VacantRoomWeb
 
             try
             {
-                // 尝试通过 HttpContext 删除 Cookie
                 context.Response.Cookies.Delete("AdminAuth");
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
             }
             catch (InvalidOperationException)
             {
-                // 响应已经开始，无法通过 HttpContext 删除 Cookie
-                // 这种情况下，我们依赖前端 JavaScript 来删除 Cookie
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie will be deleted via JavaScript");
             }
         }
 
-        // 新增：通过 JavaScript 删除 Cookie 的异步方法
         public async Task SignOutAsync(IJSRuntime jsRuntime)
         {
             var context = _httpContextAccessor.HttpContext;
@@ -152,13 +141,11 @@ namespace VacantRoomWeb
 
             try
             {
-                // 首先尝试通过 HttpContext 删除
                 context.Response.Cookies.Delete("AdminAuth");
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via HttpContext");
             }
             catch (InvalidOperationException)
             {
-                // 如果 HttpContext 方式失败，使用 JavaScript 删除
                 await jsRuntime.InvokeVoidAsync("eval",
                     "document.cookie = 'AdminAuth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; samesite=strict'");
                 _logger.LogAccess(ip, "ADMIN_LOGOUT", "Cookie deleted via JavaScript");
@@ -209,7 +196,8 @@ namespace VacantRoomWeb
 
         private string ComputeHmac(string data)
         {
-            var key = _configuration["AdminConfig:SecretKey"] ?? "DefaultSecretKey";
+            var adminConfig = _configService.GetAdminConfig();
+            var key = adminConfig.SecretKey ?? "DefaultSecretKey";
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
             var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
             return Convert.ToBase64String(hash);
@@ -246,7 +234,7 @@ namespace VacantRoomWeb
 
         public AdminConfig? GetAdminConfig()
         {
-            return _configuration.GetSection("AdminConfig").Get<AdminConfig>();
+            return _configService.GetAdminConfig();
         }
 
         public bool ValidatePassword(string password, string storedHash, string salt)
@@ -260,48 +248,37 @@ namespace VacantRoomWeb
 ============================================================
 FILE: ApplicationStartupService.cs
 ============================================================
-﻿namespace VacantRoomWeb
+﻿using VacantRoomWeb.Services;
+
+namespace VacantRoomWeb
 {
     /// <summary>
-    /// 跟踪应用程序实际启动时间的服务
+    /// 兼容性适配器 - 保持现有代码的接口不变
+    /// 内部委托给基于文件的 StartupLoggingService
     /// </summary>
     public class ApplicationStartupService
     {
-        // 使用静态字段，但通过静态构造函数确保在应用启动时初始化
-        private static readonly DateTime _applicationStartTime;
+        private readonly IStartupLoggingService _startupLoggingService;
 
-        static ApplicationStartupService()
+        public ApplicationStartupService(IStartupLoggingService startupLoggingService)
         {
-            _applicationStartTime = DateTime.Now;
+            _startupLoggingService = startupLoggingService;
         }
 
         public DateTime GetApplicationStartTime()
         {
-            return _applicationStartTime;
+            return _startupLoggingService.GetApplicationStartTime();
         }
 
         public string GetUptime()
         {
-            var uptime = DateTime.Now - _applicationStartTime;
+            var uptime = _startupLoggingService.GetUptime();
             return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
         }
 
         public string GetDetailedUptime()
         {
-            var uptime = DateTime.Now - _applicationStartTime;
-
-            if (uptime.TotalDays >= 1)
-            {
-                return $"{uptime.Days}天 {uptime.Hours}小时 {uptime.Minutes}分钟";
-            }
-            else if (uptime.TotalHours >= 1)
-            {
-                return $"{uptime.Hours}小时 {uptime.Minutes}分钟";
-            }
-            else
-            {
-                return $"{uptime.Minutes}分钟 {uptime.Seconds}秒";
-            }
+            return _startupLoggingService.GetDetailedUptime();
         }
 
         /// <summary>
@@ -309,17 +286,17 @@ FILE: ApplicationStartupService.cs
         /// </summary>
         public Dictionary<string, string> GetStartupInfo()
         {
-            var uptime = DateTime.Now - _applicationStartTime;
+            var startupInfo = _startupLoggingService.GetStartupInfo();
 
             return new Dictionary<string, string>
             {
-                ["StartTime"] = _applicationStartTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                ["Uptime"] = GetDetailedUptime(),
-                ["TotalHours"] = uptime.TotalHours.ToString("F1"),
-                ["Environment"] = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "未知",
-                ["MachineName"] = Environment.MachineName,
-                ["ProcessorCount"] = Environment.ProcessorCount.ToString(),
-                ["WorkingSet"] = $"{Environment.WorkingSet / 1024 / 1024:F0} MB"
+                ["StartTime"] = startupInfo.StartTime,
+                ["Uptime"] = startupInfo.Uptime,
+                ["TotalHours"] = startupInfo.TotalHours,
+                ["Environment"] = startupInfo.Environment,
+                ["MachineName"] = startupInfo.MachineName,
+                ["ProcessorCount"] = startupInfo.ProcessorCount,
+                ["WorkingSet"] = startupInfo.WorkingSet
             };
         }
     }
@@ -433,6 +410,108 @@ FILE: Components\Layout\MainLayout.razor
 
 
 ============================================================
+FILE: Components\Layout\MainLayout.razor.css
+============================================================
+.page {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+main {
+    flex: 1;
+}
+
+.sidebar {
+    background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%);
+}
+
+.top-row {
+    background-color: #f7f7f7;
+    border-bottom: 1px solid #d6d5d5;
+    justify-content: flex-end;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+}
+
+    .top-row ::deep a, .top-row ::deep .btn-link {
+        white-space: nowrap;
+        margin-left: 1.5rem;
+        text-decoration: none;
+    }
+
+    .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
+        text-decoration: underline;
+    }
+
+    .top-row ::deep a:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+@media (max-width: 640.98px) {
+    .top-row {
+        justify-content: space-between;
+    }
+
+    .top-row ::deep a, .top-row ::deep .btn-link {
+        margin-left: 0;
+    }
+}
+
+@media (min-width: 641px) {
+    .page {
+        flex-direction: row;
+    }
+
+    .sidebar {
+        width: 250px;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+    }
+
+    .top-row {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .top-row.auth ::deep a:first-child {
+        flex: 1;
+        text-align: right;
+        width: 0;
+    }
+
+    .top-row, article {
+        padding-left: 2rem !important;
+        padding-right: 1.5rem !important;
+    }
+}
+
+#blazor-error-ui {
+    background: lightyellow;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+    #blazor-error-ui .dismiss {
+        cursor: pointer;
+        position: absolute;
+        right: 0.75rem;
+        top: 0.5rem;
+    }
+
+
+
+============================================================
 FILE: Components\Layout\NavMenu.razor
 ============================================================
 ﻿<div class="top-row ps-3 navbar navbar-dark">
@@ -455,6 +534,117 @@ FILE: Components\Layout\NavMenu.razor
 
 
 ============================================================
+FILE: Components\Layout\NavMenu.razor.css
+============================================================
+.navbar-toggler {
+    appearance: none;
+    cursor: pointer;
+    width: 3.5rem;
+    height: 2.5rem;
+    color: white;
+    position: absolute;
+    top: 0.5rem;
+    right: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255, 255, 255, 0.55%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") no-repeat center/1.75rem rgba(255, 255, 255, 0.1);
+}
+
+.navbar-toggler:checked {
+    background-color: rgba(255, 255, 255, 0.5);
+}
+
+.top-row {
+    height: 3.5rem;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.navbar-brand {
+    font-size: 1.1rem;
+}
+
+.bi {
+    display: inline-block;
+    position: relative;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-right: 0.75rem;
+    top: -1px;
+    background-size: cover;
+}
+
+.bi-house-door-fill-nav-menu {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='white' class='bi bi-house-door-fill' viewBox='0 0 16 16'%3E%3Cpath d='M6.5 14.5v-3.505c0-.245.25-.495.5-.495h2c.25 0 .5.25.5.5v3.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5Z'/%3E%3C/svg%3E");
+}
+
+.bi-plus-square-fill-nav-menu {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='white' class='bi bi-plus-square-fill' viewBox='0 0 16 16'%3E%3Cpath d='M2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2zm6.5 4.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3a.5.5 0 0 1 1 0z'/%3E%3C/svg%3E");
+}
+
+.bi-list-nested-nav-menu {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='white' class='bi bi-list-nested' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M4.5 11.5A.5.5 0 0 1 5 11h10a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm-2-4A.5.5 0 0 1 3 7h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm-2-4A.5.5 0 0 1 1 3h10a.5.5 0 0 1 0 1H1a.5.5 0 0 1-.5-.5z'/%3E%3C/svg%3E");
+}
+
+.nav-item {
+    font-size: 0.9rem;
+    padding-bottom: 0.5rem;
+}
+
+    .nav-item:first-of-type {
+        padding-top: 1rem;
+    }
+
+    .nav-item:last-of-type {
+        padding-bottom: 1rem;
+    }
+
+    .nav-item ::deep .nav-link {
+        color: #d7d7d7;
+        background: none;
+        border: none;
+        border-radius: 4px;
+        height: 3rem;
+        display: flex;
+        align-items: center;
+        line-height: 3rem;
+        width: 100%;
+    }
+
+.nav-item ::deep a.active {
+    background-color: rgba(255,255,255,0.37);
+    color: white;
+}
+
+.nav-item ::deep .nav-link:hover {
+    background-color: rgba(255,255,255,0.1);
+    color: white;
+}
+
+.nav-scrollable {
+    display: none;
+}
+
+.navbar-toggler:checked ~ .nav-scrollable {
+    display: block;
+}
+
+@media (min-width: 641px) {
+    .navbar-toggler {
+        display: none;
+    }
+
+    .nav-scrollable {
+        /* Never collapse the sidebar for wide screens */
+        display: block;
+
+        /* Allow sidebar to scroll for tall menus */
+        height: calc(100vh - 3.5rem);
+        overflow-y: auto;
+    }
+}
+
+
+
+============================================================
 FILE: Components\Pages\AdminDashboard.razor
 ============================================================
 ﻿@page "/admin"
@@ -468,6 +658,7 @@ FILE: Components\Pages\AdminDashboard.razor
 @inject ApplicationStartupService StartupService
 @inject IEmailService EmailService
 @inject IConfiguration Configuration
+@using VacantRoomWeb.Services
 
 <PageTitle>管理后台</PageTitle>
 
@@ -521,7 +712,7 @@ else
                 <div class="stat-content">
                     <h3>@LogStats["TodayLogs"]</h3>
                     <p>今日日志总数</p>
-                    <small>内存: @LogStats["MemoryLogs"] 条</small>
+                    <small>文件存储</small>
                 </div>
             </div>
         </div>
@@ -563,7 +754,7 @@ else
                         <h3>最近访问日志</h3>
                         <div class="header-buttons">
                             <button @onclick="RefreshLogs" class="btn btn-primary btn-sm">🔄 刷新</button>
-                            <button @onclick="ClearLogs" class="btn btn-warning btn-sm">🗑️ 清空内存日志</button>
+                            <button @onclick="ClearLogs" class="btn btn-warning btn-sm">🗑️ 清空今日缓存</button>
                         </div>
                     </div>
 
@@ -650,13 +841,13 @@ else
                         </div>
 
                         <div class="info-card">
-                            <h4>日志统计</h4>
+                            <h4>日志系统</h4>
                             <p><strong>今日日志总数：</strong> @LogStats.GetValueOrDefault("TodayLogs", "未知")</p>
-                            <p><strong>内存日志数：</strong> @LogStats.GetValueOrDefault("MemoryLogs", "未知")</p>
+                            <p><strong>日志文件大小：</strong> @LogStats.GetValueOrDefault("TodayLogFileSize", "未知")</p>
                             <p><strong>今日唯一IP：</strong> @LogStats.GetValueOrDefault("TodayUniqueIPs", "未知")</p>
                             <p><strong>今日安全事件：</strong> @LogStats.GetValueOrDefault("TodaySecurityEvents", "未知")</p>
                             <p><strong>今日管理事件：</strong> @LogStats.GetValueOrDefault("TodayAdminEvents", "未知")</p>
-                            <p><strong>日志文件大小：</strong> @LogStats.GetValueOrDefault("TodayLogFileSize", "未知")</p>
+                            <p><strong>存储方式：</strong> 按日分片文件存储</p>
                         </div>
                     </div>
                 </div>
@@ -685,7 +876,7 @@ else
                         <div class="action-group">
                             <h4>日志维护</h4>
                             <div class="maintenance-controls">
-                                <button @onclick="ClearLogs" class="btn btn-warning">清空内存日志</button>
+                                <button @onclick="ClearLogs" class="btn btn-warning">清空今日缓存</button>
                                 <button @onclick="CleanupOldLogs" class="btn btn-danger">清理30天前日志文件</button>
                                 <button @onclick="ExportLogs" class="btn btn-info">导出当日日志</button>
                             </div>
@@ -1435,13 +1626,12 @@ else
     }
 </style>
 
-
 @code {
     private bool IsAuthenticated = false;
     private int ActiveTab = 0;
     private int CurrentConnections = 0;
-    private List<LogEntry> RecentLogs = new();
-    private List<LogEntry> FilteredLogs = new();
+    private List<VacantRoomWeb.LogEntry> RecentLogs = new(); // 明确指定命名空间
+    private List<VacantRoomWeb.LogEntry> FilteredLogs = new(); // 明确指定命名空间
     private List<SecurityEvent> SecurityEvents = new();
     private Dictionary<string, object> SecurityStats = new();
     private Dictionary<string, object> LogStats = new();
@@ -1472,191 +1662,80 @@ else
         }
 
         await LoadDashboardData();
-        await LoadEmailData();
 
-        // 设置定时刷新 - 每30秒自动刷新统计数据
-        _refreshTimer = new Timer(async _ =>
-        {
-            await InvokeAsync(async () =>
-            {
-                LogStats = LoggingService.GetLogStats();
-                SecurityStats = SecurityService.GetSecurityStats();
-                CurrentConnections = ConnectionService.GetCount();
-                await LoadEmailData();
-                StateHasChanged();
-            });
-        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
-    }
-
-    public void Dispose()
-    {
-        _refreshTimer?.Dispose();
+        // 设置定时刷新
+        _refreshTimer = new Timer(async _ => await InvokeAsync(RefreshData), null, TimeSpan.Zero, TimeSpan.FromSeconds(30));
     }
 
     private async Task LoadDashboardData()
     {
-        CurrentConnections = ConnectionService.GetCount();
-        RecentLogs = LoggingService.GetRecentLogs(100);
-        FilteredLogs = RecentLogs;
-        SecurityEvents = SecurityService.GetRecentSecurityEvents(30);
-        SecurityStats = SecurityService.GetSecurityStats();
-        LogStats = LoggingService.GetLogStats();
-        AvailableLogDates = LoggingService.GetAvailableLogDates();
-        LogFileInfo = LoggingService.GetLogFileInfo();
-
-        StateHasChanged();
-    }
-
-    // 加载邮件相关数据
-    private async Task LoadEmailData()
-    {
-        EmailStats = GetEmailStats();
-        EmailConfig = GetEmailConfig();
-        EmailSettings = GetEmailSettings();
-    }
-
-    // 获取邮件统计信息
-    private Dictionary<string, object> GetEmailStats()
-    {
-        var recentLogs = LoggingService.GetRecentLogs(1000);
-        var emailLogs = recentLogs.Where(l => l.Action.Contains("EMAIL") || l.Action.Contains("ALERT")).ToList();
-
-        var totalSent = emailLogs.Count;
-        var successCount = emailLogs.Count(l => !l.Details.Contains("失败") && !l.Details.Contains("error"));
-        var successRate = totalSent > 0 ? (successCount * 100 / totalSent) : 100;
-
-        var lastSent = emailLogs.OrderByDescending(l => l.Timestamp).FirstOrDefault()?.Timestamp.ToString("MM-dd HH:mm") ?? "未发送";
-
-        return new Dictionary<string, object>
-        {
-            ["TotalSent"] = totalSent,
-            ["SuccessRate"] = successRate,
-            ["LastSent"] = lastSent
-        };
-    }
-
-    // 获取邮件配置信息
-    private Dictionary<string, string> GetEmailConfig()
-    {
-        var apiUrl = Configuration["Email:NotifyHubAPI:BaseUrl"] ?? "未配置";
-        var recipient = Configuration["Email:DefaultRecipient"] ?? "未配置";
-
-        return new Dictionary<string, string>
-        {
-            ["ApiUrl"] = apiUrl,
-            ["Recipient"] = recipient,
-            ["Cooldown"] = "5",
-            ["ServiceStatus"] = "正常"
-        };
-    }
-
-    // 获取邮件通知设置
-    private EmailNotificationSettings GetEmailSettings()
-    {
-        return new EmailNotificationSettings
-        {
-            EnableDDoSAlerts = true,
-            EnableBruteForceAlerts = true,
-            EnableSystemLockdownAlerts = true,
-            EnableIPBanAlerts = true
-        };
-    }
-
-    // 测试邮件服务
-    private async Task TestEmailService()
-    {
-        IsEmailTesting = true;
-        EmailTestResult = "";
-        StateHasChanged();
-
         try
         {
-            var success = await EmailService.TestEmailServiceAsync();
+            // 加载连接数
+            CurrentConnections = ConnectionService.GetCount();
 
-            if (success)
-            {
-                EmailTestResult = "✅ 邮件服务测试成功！测试邮件已发送到 " + (Configuration["Email:DefaultRecipient"] ?? "未知邮箱");
-                EmailTestSuccess = true;
-            }
-            else
-            {
-                EmailTestResult = "❌ 邮件服务测试失败，请检查配置和网络连接";
-                EmailTestSuccess = false;
-            }
-        }
-        catch (Exception ex)
-        {
-            EmailTestResult = $"❌ 邮件服务测试异常：{ex.Message}";
-            EmailTestSuccess = false;
-        }
-        finally
-        {
-            IsEmailTesting = false;
+            // 加载日志数据
+            RecentLogs = LoggingService.GetRecentLogs(100);
+            FilteredLogs = RecentLogs;
+
+            // 加载安全数据
+            SecurityEvents = SecurityService.GetRecentSecurityEvents(50);
+            SecurityStats = SecurityService.GetSecurityStats();
+
+            // 加载日志统计
+            LogStats = LoggingService.GetLogStats();
+
+            // 加载日志文件信息
+            AvailableLogDates = LoggingService.GetAvailableLogDates();
+            LogFileInfo = LoggingService.GetLogFileInfo();
+
+            // 加载邮件统计
+            await LoadEmailStats();
+
             StateHasChanged();
         }
+        catch (Exception ex)
+        {
+            // 错误处理
+            await Console.Out.WriteLineAsync($"Error loading dashboard data: {ex.Message}");
+        }
     }
 
-    // 刷新邮件状态
-    private async Task RefreshEmailStatus()
-    {
-        await LoadEmailData();
-        StateHasChanged();
-    }
-
-    // 保存邮件设置
-    private async Task SaveEmailSettings()
+    private async Task LoadEmailStats()
     {
         try
         {
-            await JSRuntime.InvokeVoidAsync("alert", "邮件设置已保存");
+            // 这里需要实现邮件统计逻辑
+            EmailStats = new Dictionary<string, object>
+            {
+                ["TotalSent"] = "N/A",
+                ["SuccessRate"] = "N/A",
+                ["LastSent"] = "未发送"
+            };
+
+            EmailConfig = new Dictionary<string, string>
+            {
+                ["ApiUrl"] = Configuration["Email:NotifyHubAPI:BaseUrl"] ?? "未配置",
+                ["Recipient"] = Configuration["Email:DefaultRecipient"] ?? "未配置",
+                ["Cooldown"] = Configuration["Email:CooldownMinutes"] ?? "5",
+                ["ServiceStatus"] = "正常"
+            };
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("alert", $"保存失败：{ex.Message}");
+            EmailStats["Error"] = ex.Message;
         }
     }
 
-    // 发送手动邮件
-    private async Task SendManualEmail()
+    private async Task RefreshData()
     {
-        if (string.IsNullOrEmpty(ManualEmailSubject) || string.IsNullOrEmpty(ManualEmailContent))
-        {
-            await JSRuntime.InvokeVoidAsync("alert", "请填写邮件主题和内容");
-            return;
-        }
-
-        IsEmailTesting = true;
-        StateHasChanged();
-
-        try
-        {
-            var success = await EmailService.SendSystemNotificationAsync(ManualEmailSubject, ManualEmailContent);
-
-            if (success)
-            {
-                await JSRuntime.InvokeVoidAsync("alert", "邮件发送成功！");
-                ManualEmailSubject = "";
-                ManualEmailContent = "";
-            }
-            else
-            {
-                await JSRuntime.InvokeVoidAsync("alert", "邮件发送失败，请检查配置");
-            }
-        }
-        catch (Exception ex)
-        {
-            await JSRuntime.InvokeVoidAsync("alert", $"邮件发送异常：{ex.Message}");
-        }
-        finally
-        {
-            IsEmailTesting = false;
-            StateHasChanged();
-        }
+        await LoadDashboardData();
     }
 
     private void SetActiveTab(int tabIndex)
     {
         ActiveTab = tabIndex;
+        StateHasChanged();
     }
 
     private async Task RefreshLogs()
@@ -1668,16 +1747,21 @@ else
 
     private async Task RefreshSecurity()
     {
-        SecurityEvents = SecurityService.GetRecentSecurityEvents(30);
+        SecurityEvents = SecurityService.GetRecentSecurityEvents(50);
         SecurityStats = SecurityService.GetSecurityStats();
         StateHasChanged();
     }
 
-    private async Task RefreshStats()
+    private async Task RefreshSystemInfo()
     {
         LogStats = LoggingService.GetLogStats();
-        SecurityStats = SecurityService.GetSecurityStats();
         CurrentConnections = ConnectionService.GetCount();
+        StateHasChanged();
+    }
+
+    private async Task RefreshEmailStatus()
+    {
+        await LoadEmailStats();
         StateHasChanged();
     }
 
@@ -1690,19 +1774,95 @@ else
     private async Task CleanupOldLogs()
     {
         LoggingService.CleanupOldLogs(30);
-        AvailableLogDates = LoggingService.GetAvailableLogDates();
+        LogFileInfo = LoggingService.GetLogFileInfo();
         StateHasChanged();
     }
 
     private async Task ExportLogs()
     {
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
-        await JSRuntime.InvokeVoidAsync("alert", $"导出功能开发中，将导出 {today} 的日志文件");
+        // 导出日志逻辑
+        await Task.CompletedTask;
     }
 
     private async Task ViewLogFile(string date)
     {
-        await JSRuntime.InvokeVoidAsync("alert", $"查看功能开发中，将显示 {date} 的日志内容");
+        // 查看日志文件逻辑
+        await Task.CompletedTask;
+    }
+
+    private async Task TestEmailService()
+    {
+        IsEmailTesting = true;
+        EmailTestResult = "";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.TestEmailServiceAsync();
+            EmailTestSuccess = success;
+            EmailTestResult = success ? "邮件发送成功！" : "邮件发送失败，请检查配置。";
+        }
+        catch (Exception ex)
+        {
+            EmailTestSuccess = false;
+            EmailTestResult = $"测试过程中发生错误：{ex.Message}";
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveEmailSettings()
+    {
+        // 保存邮件设置逻辑
+        await Task.CompletedTask;
+        StateHasChanged();
+    }
+
+    private async Task SendManualEmail()
+    {
+        if (string.IsNullOrEmpty(ManualEmailSubject)) return;
+
+        IsEmailTesting = true;
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SendSystemNotificationAsync(ManualEmailSubject, ManualEmailContent);
+            EmailTestSuccess = success;
+            EmailTestResult = success ? "邮件发送成功！" : "邮件发送失败。";
+
+            if (success)
+            {
+                ManualEmailSubject = "";
+                ManualEmailContent = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            EmailTestSuccess = false;
+            EmailTestResult = $"发送过程中发生错误：{ex.Message}";
+        }
+        finally
+        {
+            IsEmailTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleLogout()
+    {
+        try
+        {
+            await AuthService.SignOutAsync(JSRuntime);
+            Navigation.NavigateTo("/admin/login", true);
+        }
+        catch (Exception)
+        {
+            Navigation.NavigateTo("/admin/login", true);
+        }
     }
 
     private void ApplyFilter()
@@ -1718,45 +1878,12 @@ else
         StateHasChanged();
     }
 
-    private async Task HandleLogout()
-    {
-        try
-        {
-            await AuthService.SignOutAsync(JSRuntime);
-            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
-        }
-        catch (Exception ex)
-        {
-            await JSRuntime.InvokeVoidAsync("console.error", $"Logout error: {ex.Message}");
-            await JSRuntime.InvokeVoidAsync("location.replace", "/admin/login");
-        }
-    }
-
     private string GetLogRowClass(string action)
     {
         if (action.StartsWith("SECURITY_")) return "security-row";
-        if (action.StartsWith("ERROR_")) return "error-row";
+        if (action.Contains("ERROR") || action.Contains("FAILED")) return "error-row";
         if (action == "ACCESS") return "access-row";
         return "";
-    }
-
-    private string GetSecurityEventClass(string eventType)
-    {
-        if (eventType.Contains("BRUTE_FORCE") || eventType.Contains("DDOS") || eventType.Contains("BANNED"))
-            return "danger";
-        return "warning";
-    }
-
-    private string TruncateUserAgent(string userAgent)
-    {
-        if (string.IsNullOrEmpty(userAgent)) return "N/A";
-        return userAgent.Length > 30 ? userAgent.Substring(0, 30) + "..." : userAgent;
-    }
-
-    private string GetUptime()
-    {
-        var uptime = DateTime.Now - StartTime;
-        return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
     }
 
     private string FormatActionType(string action)
@@ -1764,39 +1891,33 @@ else
         return action switch
         {
             "ACCESS" => "页面访问",
-            "BLAZOR_CONNECTION_UP" => "连接建立",
-            "BLAZOR_CONNECTION_DOWN" => "连接断开",
-            "LOCALHOST_ADMIN_ACCESS" => "本地管理访问",
-            "ADMIN_SUBDOMAIN_ACCESS" => "管理域名访问",
-            "ADMIN_SUBDOMAIN_REDIRECT" => "管理域名重定向",
-            "ADMIN_PATH_REWRITE" => "路径重写",
-            "ADMIN_ACCESS_BLOCKED" => "管理访问被阻止",
-            "ACCESS_DENIED_BANNED" => "访问被拒绝(IP封禁)",
-            "ACCESS_DENIED_LOCKDOWN" => "访问被拒绝(系统锁定)",
-            "SECURITY_DDOS_DETECTED" => "检测到DDoS攻击",
-            "SECURITY_BRUTE_FORCE_DETECTED" => "检测到暴力破解",
-            "SECURITY_IP_BANNED" => "IP地址被封禁",
-            "SECURITY_ADMIN_LOCKDOWN" => "管理面板锁定",
             "ADMIN_LOGIN_SUCCESS" => "管理员登录成功",
             "ADMIN_LOGIN_FAILED" => "管理员登录失败",
-            "ADMIN_LOGOUT" => "管理员退出登录",
-            "ADMIN_AUTH_COOKIE_SET" => "设置认证Cookie",
-            "EMAIL_ALERT_TRIGGERED" => "邮件警报触发",
+            "BLAZOR_CONNECTION_UP" => "连接建立",
+            "BLAZOR_CONNECTION_DOWN" => "连接断开",
             "QUERY_VACANT_ROOMS" => "查询空教室",
-            "QUERY_ROOM_USAGE" => "查询教室使用情况",
-            "QUERY_RESULT" => "查询结果",
-            "ERROR_FILE_NOT_FOUND" => "文件未找到错误",
+            "QUERY_ROOM_USAGE" => "查询教室使用",
+            var s when s.StartsWith("SECURITY_") => "安全事件",
             _ => action
         };
     }
 
-    private async Task RefreshSystemInfo()
+    private string TruncateUserAgent(string userAgent)
     {
-        LogStats = LoggingService.GetLogStats();
-        SecurityStats = SecurityService.GetSecurityStats();
-        CurrentConnections = ConnectionService.GetCount();
-        AvailableLogDates = LoggingService.GetAvailableLogDates();
-        StateHasChanged();
+        if (string.IsNullOrEmpty(userAgent)) return "";
+        return userAgent.Length > 50 ? userAgent.Substring(0, 50) + "..." : userAgent;
+    }
+
+    private string GetSecurityEventClass(string eventType)
+    {
+        if (eventType.Contains("BRUTE_FORCE") || eventType.Contains("DDOS")) return "danger";
+        if (eventType.Contains("WARNING")) return "warning";
+        return "danger";
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
     }
 }
 
@@ -1985,6 +2106,7 @@ FILE: Components\Pages\AdminLogin.razor
 FILE: Components\Pages\EmailTest.razor
 ============================================================
 ﻿@page "/admin/email-test"
+@using VacantRoomWeb.Services
 @rendermode InteractiveServer
 @inject IEmailService EmailService
 @inject AdminAuthService AuthService
@@ -2868,6 +2990,7 @@ FILE: Components\_Imports.razor
 @using Microsoft.JSInterop
 @using VacantRoomWeb
 @using VacantRoomWeb.Components
+@using VacantRoomWeb.Services
 @using System.ComponentModel.DataAnnotations
 
 
@@ -3139,10 +3262,13 @@ namespace VacantRoomWeb
 ============================================================
 FILE: EnhancedLoggingService.cs
 ============================================================
-﻿using System.Collections.Concurrent;
+﻿// EnhancedLoggingService.cs - 修复命名冲突版本
+using System.Collections.Concurrent;
+using System.Text;
 
 namespace VacantRoomWeb
 {
+    // 确保 LogEntry 在 VacantRoomWeb 命名空间中，避免冲突
     public class LogEntry
     {
         public DateTime Timestamp { get; set; }
@@ -3153,17 +3279,29 @@ namespace VacantRoomWeb
         public string RequestPath { get; set; } = "";
     }
 
-    public class EnhancedLoggingService
+    public class EnhancedLoggingService : IDisposable
     {
         private readonly string _logDirectory;
-        private readonly ConcurrentQueue<LogEntry> _recentLogs = new();
         private readonly object _fileLock = new();
-        private const int MaxRecentLogs = 500;
+        private readonly ILogger<EnhancedLoggingService> _logger;
 
-        public EnhancedLoggingService()
+        // 缓存当日日志文件路径和日期，避免重复计算
+        private string _currentLogFilePath;
+        private DateTime _currentLogDate;
+
+        // 可选的小量内存缓存，用于提升管理后台显示性能（可配置）
+        private readonly bool _enableMemoryCache = false;
+        private readonly ConcurrentQueue<LogEntry> _memoryCache = new();
+        private const int MaxMemoryCacheSize = 100; // 只缓存最近100条
+
+        public EnhancedLoggingService(ILogger<EnhancedLoggingService> logger = null)
         {
+            _logger = logger;
             _logDirectory = Path.Combine(AppContext.BaseDirectory, "Logs");
             Directory.CreateDirectory(_logDirectory);
+
+            // 初始化当前日志文件路径
+            UpdateCurrentLogFilePath();
         }
 
         public void LogAccess(string ip, string action, string details = "", string userAgent = "", string requestPath = "")
@@ -3178,82 +3316,163 @@ namespace VacantRoomWeb
                 RequestPath = requestPath
             };
 
-            // Add to memory queue
-            _recentLogs.Enqueue(logEntry);
-
-            // Keep only recent logs in memory
-            while (_recentLogs.Count > MaxRecentLogs)
-            {
-                _recentLogs.TryDequeue(out _);
-            }
-
-            // Write to file (no console output for IIS)
+            // 写入文件（主要存储）
             WriteToFile(logEntry);
+
+            // 可选：加入内存缓存以提升性能
+            if (_enableMemoryCache)
+            {
+                AddToMemoryCache(logEntry);
+            }
         }
 
         private void WriteToFile(LogEntry entry)
         {
-            try
+            lock (_fileLock)
             {
-                var fileName = $"access-{DateTime.Now:yyyy-MM-dd}.log";
-                var filePath = Path.Combine(_logDirectory, fileName);
-
-                var logLine = $"[{entry.Timestamp:yyyy-MM-dd HH:mm:ss}] IP:{entry.IP} ACTION:{entry.Action} PATH:{entry.RequestPath} DETAILS:{entry.Details} UA:{entry.UserAgent}";
-
-                lock (_fileLock)
+                try
                 {
-                    File.AppendAllText(filePath, logLine + Environment.NewLine);
+                    // 检查是否需要切换到新的日志文件（跨日期）
+                    if (DateTime.Today != _currentLogDate)
+                    {
+                        UpdateCurrentLogFilePath();
+                    }
+
+                    var logLine = FormatLogEntry(entry);
+
+                    // 使用追加模式写入文件
+                    File.AppendAllText(_currentLogFilePath, logLine + Environment.NewLine, Encoding.UTF8);
+                }
+                catch (Exception ex)
+                {
+                    // 静默处理文件写入错误，避免影响主业务
+                    _logger?.LogError(ex, "写入日志文件失败: {FilePath}", _currentLogFilePath);
                 }
             }
-            catch
+        }
+
+        private void AddToMemoryCache(LogEntry entry)
+        {
+            _memoryCache.Enqueue(entry);
+
+            // 保持内存缓存大小
+            while (_memoryCache.Count > MaxMemoryCacheSize)
             {
-                // Silently fail in production environment
+                _memoryCache.TryDequeue(out _);
             }
+        }
+
+        private void UpdateCurrentLogFilePath()
+        {
+            _currentLogDate = DateTime.Today;
+            var fileName = $"access-{_currentLogDate:yyyy-MM-dd}.log";
+            _currentLogFilePath = Path.Combine(_logDirectory, fileName);
+        }
+
+        private string FormatLogEntry(LogEntry entry)
+        {
+            return $"[{entry.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] IP:{entry.IP} ACTION:{entry.Action} PATH:{entry.RequestPath} DETAILS:{entry.Details} UA:{entry.UserAgent}";
         }
 
         public List<LogEntry> GetRecentLogs(int count = 100)
         {
-            return _recentLogs.TakeLast(count).ToList();
+            // 如果启用了内存缓存且请求数量较小，优先使用内存缓存
+            if (_enableMemoryCache && count <= MaxMemoryCacheSize)
+            {
+                return _memoryCache.TakeLast(count).OrderByDescending(l => l.Timestamp).ToList();
+            }
+
+            // 否则从文件读取
+            var logs = new List<LogEntry>();
+            var today = DateTime.Today;
+
+            // 从今天开始，向前查找日志文件
+            for (int dayOffset = 0; dayOffset <= 7 && logs.Count < count; dayOffset++)
+            {
+                var date = today.AddDays(-dayOffset);
+                var filePath = GetLogFilePath(date);
+
+                if (File.Exists(filePath))
+                {
+                    var fileLogs = ReadLogsFromFile(filePath, count - logs.Count, true);
+                    logs.AddRange(fileLogs);
+                }
+            }
+
+            return logs.OrderByDescending(l => l.Timestamp).Take(count).ToList();
         }
 
         public List<LogEntry> GetLogsByDate(DateTime date)
         {
-            var fileName = $"access-{date:yyyy-MM-dd}.log";
-            var filePath = Path.Combine(_logDirectory, fileName);
+            var filePath = GetLogFilePath(date);
 
             if (!File.Exists(filePath))
                 return new List<LogEntry>();
 
+            return ReadLogsFromFile(filePath, int.MaxValue, false);
+        }
+
+        private List<LogEntry> ReadLogsFromFile(string filePath, int maxCount, bool fromEnd)
+        {
+            var logs = new List<LogEntry>();
+
+            lock (_fileLock)
+            {
+                try
+                {
+                    // 对于大文件，使用流式读取而不是一次性读取所有行
+                    if (fromEnd)
+                    {
+                        // 从文件末尾反向读取
+                        logs = ReadLogsFromEndOfFile(filePath, maxCount);
+                    }
+                    else
+                    {
+                        // 从文件开头读取
+                        using var reader = new StreamReader(filePath, Encoding.UTF8);
+                        string line;
+                        while ((line = reader.ReadLine()) != null && logs.Count < maxCount)
+                        {
+                            if (TryParseLogLine(line, out var logEntry))
+                            {
+                                logs.Add(logEntry);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "读取日志文件失败: {FilePath}", filePath);
+                }
+            }
+
+            return logs;
+        }
+
+        private List<LogEntry> ReadLogsFromEndOfFile(string filePath, int maxCount)
+        {
+            var logs = new List<LogEntry>();
+
             try
             {
-                // 强制刷新文件缓存，确保读取最新内容
-                var lines = File.ReadAllLines(filePath);
-                var logs = new List<LogEntry>();
+                // 简单实现：读取所有行然后取后面的
+                // 对于更高效的实现，可以使用文件流从末尾开始读取
+                var lines = File.ReadAllLines(filePath, Encoding.UTF8);
 
-                foreach (var line in lines)
+                for (int i = lines.Length - 1; i >= 0 && logs.Count < maxCount; i--)
                 {
-                    if (TryParseLogLine(line, out var logEntry))
+                    if (TryParseLogLine(lines[i], out var logEntry))
                     {
                         logs.Add(logEntry);
                     }
                 }
-
-                return logs;
             }
-            catch
+            catch (Exception ex)
             {
-                return new List<LogEntry>();
+                _logger?.LogError(ex, "从文件末尾读取日志失败: {FilePath}", filePath);
             }
-        }
 
-        // 新增：强制刷新统计的方法，确保获取最新数据
-        public void FlushLogs()
-        {
-            // 这个方法确保所有pending的日志都被写入
-            lock (_fileLock)
-            {
-                // 强制刷新文件系统缓存
-            }
+            return logs;
         }
 
         private bool TryParseLogLine(string line, out LogEntry logEntry)
@@ -3262,19 +3481,24 @@ namespace VacantRoomWeb
 
             try
             {
-                // 修复解析逻辑：日志格式是 [时间] IP:xxx ACTION:xxx PATH:xxx DETAILS:xxx UA:xxx
-                if (!line.StartsWith("[")) return false;
+                if (string.IsNullOrEmpty(line) || !line.StartsWith("["))
+                    return false;
 
+                // 解析时间戳
                 var timestampEnd = line.IndexOf(']');
                 if (timestampEnd == -1) return false;
 
                 var timestampStr = line.Substring(1, timestampEnd - 1);
-                logEntry.Timestamp = DateTime.Parse(timestampStr);
+                if (!DateTime.TryParseExact(timestampStr, "yyyy-MM-dd HH:mm:ss.fff", null,
+                    System.Globalization.DateTimeStyles.None, out var timestamp))
+                    return false;
 
+                logEntry.Timestamp = timestamp;
+
+                // 解析其余字段
                 var remainingLine = line.Substring(timestampEnd + 1).Trim();
-
-                // 使用正确的分隔符解析
-                var parts = remainingLine.Split(new[] { " IP:", " ACTION:", " PATH:", " DETAILS:", " UA:" }, StringSplitOptions.None);
+                var parts = remainingLine.Split(new[] { " IP:", " ACTION:", " PATH:", " DETAILS:", " UA:" },
+                    StringSplitOptions.None);
 
                 if (parts.Length >= 5)
                 {
@@ -3283,7 +3507,6 @@ namespace VacantRoomWeb
                     logEntry.RequestPath = parts[3];
                     logEntry.Details = parts[4];
 
-                    // UA可能为空或者不存在
                     if (parts.Length > 5)
                     {
                         logEntry.UserAgent = parts[5];
@@ -3294,11 +3517,16 @@ namespace VacantRoomWeb
             }
             catch (Exception ex)
             {
-                // 调试：记录解析失败的行
-                // 这在生产环境中应该被移除
+                _logger?.LogDebug(ex, "解析日志行失败: {Line}", line);
             }
 
             return false;
+        }
+
+        private string GetLogFilePath(DateTime date)
+        {
+            var fileName = $"access-{date:yyyy-MM-dd}.log";
+            return Path.Combine(_logDirectory, fileName);
         }
 
         public List<string> GetAvailableLogDates()
@@ -3308,85 +3536,118 @@ namespace VacantRoomWeb
                 return Directory.GetFiles(_logDirectory, "access-*.log")
                     .Select(f => Path.GetFileName(f))
                     .Select(f => f.Replace("access-", "").Replace(".log", ""))
+                    .Where(dateStr => DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null,
+                        System.Globalization.DateTimeStyles.None, out _))
                     .OrderByDescending(d => d)
                     .ToList();
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogError(ex, "获取可用日志日期失败");
                 return new List<string>();
             }
         }
 
-        // 清理内存日志
         public void ClearRecentLogs()
         {
-            while (_recentLogs.TryDequeue(out _)) { }
+            lock (_fileLock)
+            {
+                try
+                {
+                    // 清空内存缓存
+                    if (_enableMemoryCache)
+                    {
+                        while (_memoryCache.TryDequeue(out _)) { }
+                    }
+
+                    // 清空今日的日志文件
+                    if (File.Exists(_currentLogFilePath))
+                    {
+                        File.WriteAllText(_currentLogFilePath, "", Encoding.UTF8);
+                        _logger?.LogInformation("已清空今日日志文件: {FilePath}", _currentLogFilePath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "清空日志失败: {FilePath}", _currentLogFilePath);
+                }
+            }
         }
 
-        // 简化的日志统计方法 - 直接使用内存数据
         public Dictionary<string, object> GetLogStats()
         {
-            var memoryLogs = _recentLogs.ToList();
+            var stats = new Dictionary<string, object>();
             var today = DateTime.Today;
 
-            // 直接使用内存中今天的日志数据，避免文件解析问题
-            var todayFromMemory = memoryLogs.Where(l => l.Timestamp.Date == today).ToList();
-
-            var stats = new Dictionary<string, object>();
-
-            // 内存日志统计
-            var memoryActionGroups = memoryLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
-            var memoryIpCount = memoryLogs.Select(l => l.IP).Distinct().Count();
-
-            stats["MemoryLogs"] = memoryLogs.Count;
-            stats["MemoryUniqueIPs"] = memoryIpCount;
-            stats["MemorySecurityEvents"] = memoryActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
-            stats["MemoryAdminEvents"] = memoryActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
-
-            // 今日统计 - 使用内存数据
-            var todayActionGroups = todayFromMemory.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
-            var todayIpCount = todayFromMemory.Select(l => l.IP).Distinct().Count();
-
-            stats["TodayLogs"] = todayFromMemory.Count;
-            stats["TodayUniqueIPs"] = todayIpCount;
-            stats["TodaySecurityEvents"] = todayActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
-            stats["TodayAdminEvents"] = todayActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
-
-            // 文件信息（用于调试）
-            var todayFileName = $"access-{today:yyyy-MM-dd}.log";
-            var todayFilePath = Path.Combine(_logDirectory, todayFileName);
-
-            if (File.Exists(todayFilePath))
+            try
             {
-                var fileInfo = new FileInfo(todayFilePath);
-                stats["TodayLogFileSize"] = $"{fileInfo.Length / 1024.0:F1} KB";
+                // 今日日志统计（从文件读取）
+                var todayLogs = GetLogsByDate(today);
+                var todayActionGroups = todayLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+                var todayIpCount = todayLogs.Select(l => l.IP).Distinct().Count();
+
+                stats["TodayLogs"] = todayLogs.Count;
+                stats["TodayUniqueIPs"] = todayIpCount;
+                stats["TodaySecurityEvents"] = todayActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
+                stats["TodayAdminEvents"] = todayActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
+
+                // 内存统计
+                if (_enableMemoryCache)
+                {
+                    var memoryLogs = _memoryCache.ToList();
+                    var memoryActionGroups = memoryLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+                    var memoryIpCount = memoryLogs.Select(l => l.IP).Distinct().Count();
+
+                    stats["MemoryLogs"] = memoryLogs.Count;
+                    stats["MemoryUniqueIPs"] = memoryIpCount;
+                    stats["MemorySecurityEvents"] = memoryActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
+                    stats["MemoryAdminEvents"] = memoryActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
+                }
+                else
+                {
+                    stats["MemoryLogs"] = 0;
+                    stats["MemoryUniqueIPs"] = 0;
+                    stats["MemorySecurityEvents"] = 0;
+                    stats["MemoryAdminEvents"] = 0;
+                }
+
+                // 今日日志文件大小
+                var todayFilePath = GetLogFilePath(today);
+                if (File.Exists(todayFilePath))
+                {
+                    var fileInfo = new FileInfo(todayFilePath);
+                    stats["TodayLogFileSize"] = $"{fileInfo.Length / 1024.0:F1} KB";
+                }
+                else
+                {
+                    stats["TodayLogFileSize"] = "0 KB";
+                }
+
+                // 调试信息
+                stats["DebugInfo"] = $"文件日志: {todayLogs.Count}, 内存缓存: {(_enableMemoryCache ? _memoryCache.Count : 0)}";
+                stats["DebugLogDirectory"] = _logDirectory;
+                stats["DebugCurrentTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                stats["DebugTodayDate"] = today.ToString("yyyy-MM-dd");
             }
-            else
+            catch (Exception ex)
             {
+                _logger?.LogError(ex, "获取日志统计失败");
+
+                // 返回基础统计
+                stats["TodayLogs"] = 0;
+                stats["MemoryLogs"] = 0;
                 stats["TodayLogFileSize"] = "0 KB";
             }
-
-            // 简化的调试信息
-            stats["DebugInfo"] = $"内存总数: {memoryLogs.Count}, 今日内存: {todayFromMemory.Count}";
-            stats["DebugLogDirectory"] = _logDirectory;
-            stats["DebugCurrentTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            stats["DebugTodayDate"] = today.ToString("yyyy-MM-dd");
 
             return stats;
         }
 
-        // 获取当日日志文件的行数（快速方法）
         public int GetTodayLogCount()
         {
-            var fileName = $"access-{DateTime.Today:yyyy-MM-dd}.log";
-            var filePath = Path.Combine(_logDirectory, fileName);
-
-            if (!File.Exists(filePath))
-                return 0;
-
             try
             {
-                return File.ReadAllLines(filePath).Length;
+                var todayLogs = GetLogsByDate(DateTime.Today);
+                return todayLogs.Count;
             }
             catch
             {
@@ -3394,7 +3655,6 @@ namespace VacantRoomWeb
             }
         }
 
-        // 删除旧日志文件
         public void CleanupOldLogs(int daysToKeep = 30)
         {
             try
@@ -3407,22 +3667,23 @@ namespace VacantRoomWeb
                     var fileName = Path.GetFileNameWithoutExtension(file);
                     var dateStr = fileName.Replace("access-", "");
 
-                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null,
+                        System.Globalization.DateTimeStyles.None, out var fileDate))
                     {
                         if (fileDate < cutoffDate)
                         {
                             File.Delete(file);
+                            _logger?.LogInformation("删除过期日志文件: {File}", file);
                         }
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Silently fail
+                _logger?.LogError(ex, "清理旧日志文件失败");
             }
         }
 
-        // 获取日志文件信息
         public List<(string Date, int Count, string Size)> GetLogFileInfo()
         {
             var result = new List<(string Date, int Count, string Size)>();
@@ -3436,10 +3697,11 @@ namespace VacantRoomWeb
                     var fileName = Path.GetFileNameWithoutExtension(file);
                     var dateStr = fileName.Replace("access-", "");
 
-                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null,
+                        System.Globalization.DateTimeStyles.None, out var fileDate))
                     {
                         var fileInfo = new FileInfo(file);
-                        var lineCount = File.ReadAllLines(file).Length;
+                        var lineCount = CountLinesInFile(file);
                         var size = $"{fileInfo.Length / 1024.0:F1} KB";
 
                         result.Add((dateStr, lineCount, size));
@@ -3448,17 +3710,44 @@ namespace VacantRoomWeb
 
                 return result.OrderByDescending(r => r.Date).ToList();
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogError(ex, "获取日志文件信息失败");
                 return result;
             }
         }
 
-        // 新增：强制刷新统计的方法
+        private int CountLinesInFile(string filePath)
+        {
+            try
+            {
+                int lineCount = 0;
+                using var reader = new StreamReader(filePath, Encoding.UTF8);
+                while (reader.ReadLine() != null)
+                {
+                    lineCount++;
+                }
+                return lineCount;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         public void ForceRefreshStats()
         {
-            // 这个方法可以用来触发统计更新
-            // 目前主要是为了调试使用
+            // 对于基于文件的系统，统计数据总是最新的，无需特殊刷新操作
+            // 如果启用了内存缓存，可以选择性地重新计算缓存统计
+        }
+
+        public void Dispose()
+        {
+            // 清理资源
+            if (_enableMemoryCache)
+            {
+                while (_memoryCache.TryDequeue(out _)) { }
+            }
         }
     }
 }
@@ -3548,6 +3837,7 @@ FILE: Program.cs
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using VacantRoomWeb;
 using VacantRoomWeb.Components;
+using VacantRoomWeb.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -3561,6 +3851,9 @@ builder.Services.AddSignalR(options =>
     options.EnableDetailedErrors = true;
 });
 
+// Register configuration service first (other services depend on it)
+builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
+
 // Register HttpClient for EmailService
 builder.Services.AddHttpClient<IEmailService, EmailService>();
 
@@ -3571,9 +3864,13 @@ builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 // Register new security and logging services
 builder.Services.AddSingleton<EnhancedLoggingService>();
+builder.Services.AddSingleton<IStartupLoggingService, StartupLoggingService>();
+builder.Services.AddSingleton<ApplicationStartupService>(provider =>
+    new ApplicationStartupService(provider.GetRequiredService<IStartupLoggingService>()));
+
+// Register security and other services
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<AdminAuthService>();
-builder.Services.AddSingleton<ApplicationStartupService>();
 
 // Register notification service for component communication
 builder.Services.AddSingleton<NotificationService>();
@@ -3583,6 +3880,10 @@ builder.Services.AddSingleton<VacantRoomService>();
 builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
 
 var app = builder.Build();
+
+// 记录应用程序启动
+var startupService = app.Services.GetRequiredService<IStartupLoggingService>();
+startupService.RecordStart();
 
 // Configure the HTTP request pipeline
 if (!app.Environment.IsDevelopment())
@@ -3606,6 +3907,49 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+
+============================================================
+FILE: Properties\launchSettings.json
+============================================================
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:5000",
+      "sslPort": 5001
+    }
+  },
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:5001;http://localhost:5000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "IIS Express": {
+      "commandName": "IISExpress",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
 
 
 ============================================================
@@ -3725,8 +4069,9 @@ FILE: SecurityMiddleware.cs
 ============================================================
 FILE: SecurityService.cs
 ============================================================
-﻿// SecurityService.cs - 更新部分
+﻿// SecurityService.cs - 修复版本
 using System.Collections.Concurrent;
+using VacantRoomWeb.Services; // 添加这行来引用邮件服务
 
 namespace VacantRoomWeb
 {
@@ -4018,6 +4363,854 @@ namespace VacantRoomWeb
             {
                 _bannedIPs.TryRemove(ip, out _);
             }
+        }
+    }
+}
+
+
+============================================================
+FILE: Services\ConfigurationService.cs
+============================================================
+﻿// Services/ConfigurationService.cs
+namespace VacantRoomWeb.Services
+{
+    public class AdminConfig
+    {
+        public string Username { get; set; } = "";
+        public string PasswordHash { get; set; } = "";
+        public string Salt { get; set; } = "";
+        public string SecretKey { get; set; } = "";
+    }
+
+    public interface IConfigurationService
+    {
+        AdminConfig? GetAdminConfig();
+        string GetEmailApiUrl();
+        string GetEmailApiKey();
+        string GetDefaultRecipient();
+        int GetEmailCooldownMinutes();
+    }
+
+    public class ConfigurationService : IConfigurationService
+    {
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<ConfigurationService> _logger;
+
+        public ConfigurationService(IConfiguration configuration, ILogger<ConfigurationService> logger = null)
+        {
+            _configuration = configuration;
+            _logger = logger;
+        }
+
+        public AdminConfig? GetAdminConfig()
+        {
+            try
+            {
+                var config = new AdminConfig();
+                _configuration.GetSection("AdminConfig").Bind(config);
+
+                if (string.IsNullOrEmpty(config.Username) ||
+                    string.IsNullOrEmpty(config.PasswordHash) ||
+                    string.IsNullOrEmpty(config.Salt))
+                {
+                    _logger?.LogWarning("Admin configuration is incomplete");
+                    return null;
+                }
+
+                return config;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to load admin configuration");
+                return null;
+            }
+        }
+
+        public string GetEmailApiUrl()
+        {
+            return _configuration["Email:NotifyHubAPI:BaseUrl"] ?? "";
+        }
+
+        public string GetEmailApiKey()
+        {
+            return _configuration["Email:NotifyHubAPI:ApiKey"] ?? "";
+        }
+
+        public string GetDefaultRecipient()
+        {
+            return _configuration["Email:DefaultRecipient"] ?? "";
+        }
+
+        public int GetEmailCooldownMinutes()
+        {
+            return _configuration.GetValue<int>("Email:CooldownMinutes", 5);
+        }
+    }
+}
+
+
+============================================================
+FILE: Services\EmailService.cs
+============================================================
+﻿// Services/EmailService.cs
+using System.Text;
+using System.Text.Json;
+
+namespace VacantRoomWeb.Services
+{
+    public class EmailService : IEmailService
+    {
+        private readonly HttpClient _httpClient;
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<EmailService> _logger;
+        private readonly Dictionary<string, DateTime> _lastSentTimes = new();
+        private readonly object _cooldownLock = new();
+
+        public EmailService(HttpClient httpClient, IConfiguration configuration, ILogger<EmailService> logger)
+        {
+            _httpClient = httpClient;
+            _configuration = configuration;
+            _logger = logger;
+
+            ConfigureHttpClient();
+        }
+
+        private void ConfigureHttpClient()
+        {
+            var timeoutSeconds = _configuration.GetValue<int>("Email:TimeoutSeconds", 30);
+            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        }
+
+        public async Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null)
+        {
+            if (!CheckCooldown("security_alert"))
+            {
+                _logger.LogWarning("Security alert email skipped due to cooldown");
+                return false;
+            }
+
+            var emailContent = FormatSecurityAlert(subject, message, ipAddress);
+            return await SendEmailAsync(subject, emailContent);
+        }
+
+        public async Task<bool> SendSystemNotificationAsync(string subject, string message)
+        {
+            if (!CheckCooldown("system_notification"))
+            {
+                _logger.LogWarning("System notification email skipped due to cooldown");
+                return false;
+            }
+
+            var emailContent = FormatSystemNotification(subject, message);
+            return await SendEmailAsync(subject, emailContent);
+        }
+
+        public async Task<bool> TestEmailServiceAsync()
+        {
+            var subject = "VacantRoomWeb 邮件服务测试";
+            var message = FormatTestEmail();
+            return await SendEmailAsync(subject, message);
+        }
+
+        public void SendSecurityAlert(string subject, string message)
+        {
+            _ = Task.Run(async () => await SendSecurityAlertAsync(subject, message));
+        }
+
+        public void SendSystemNotification(string subject, string message)
+        {
+            _ = Task.Run(async () => await SendSystemNotificationAsync(subject, message));
+        }
+
+        private async Task<bool> SendEmailAsync(string subject, string content)
+        {
+            try
+            {
+                var apiUrl = _configuration["Email:NotifyHubAPI:BaseUrl"];
+                var apiKey = _configuration["Email:NotifyHubAPI:ApiKey"];
+                var recipient = _configuration["Email:DefaultRecipient"];
+
+                if (string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(recipient))
+                {
+                    _logger.LogError("Email configuration is incomplete");
+                    return false;
+                }
+
+                var payload = new
+                {
+                    to = recipient,
+                    subject = subject,
+                    content = content,
+                    contentType = "html"
+                };
+
+                var jsonContent = JsonSerializer.Serialize(payload);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    httpContent.Headers.Add("X-API-Key", apiKey);
+                }
+
+                var maxRetries = _configuration.GetValue<int>("Email:MaxRetries", 3);
+
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
+                {
+                    try
+                    {
+                        var response = await _httpClient.PostAsync($"{apiUrl}/api/send", httpContent);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            _logger.LogInformation("Email sent successfully: {Subject}", subject);
+                            return true;
+                        }
+
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("Email send failed (attempt {Attempt}/{MaxRetries}): {StatusCode} - {Error}",
+                            attempt, maxRetries, response.StatusCode, errorContent);
+
+                        if (attempt < maxRetries)
+                        {
+                            await Task.Delay(1000 * attempt); // Exponential backoff
+                        }
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        _logger.LogWarning("HTTP request failed (attempt {Attempt}/{MaxRetries}): {Error}",
+                            attempt, maxRetries, ex.Message);
+
+                        if (attempt < maxRetries)
+                        {
+                            await Task.Delay(1000 * attempt);
+                        }
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send email: {Subject}", subject);
+                return false;
+            }
+        }
+
+        private bool CheckCooldown(string emailType)
+        {
+            lock (_cooldownLock)
+            {
+                var cooldownMinutes = _configuration.GetValue<int>("Email:CooldownMinutes", 5);
+                var now = DateTime.Now;
+
+                if (_lastSentTimes.TryGetValue(emailType, out var lastSent))
+                {
+                    if (now.Subtract(lastSent).TotalMinutes < cooldownMinutes)
+                    {
+                        return false;
+                    }
+                }
+
+                _lastSentTimes[emailType] = now;
+                return true;
+            }
+        }
+
+        private string FormatSecurityAlert(string subject, string message, string ipAddress)
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>安全警报</title>
+</head>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #dc3545; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>🚨 安全警报</h1>
+        </div>
+        <div style='padding: 30px;'>
+            <h2 style='color: #dc3545; margin-top: 0;'>{subject}</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>{message}</p>
+            </div>
+            {(string.IsNullOrEmpty(ipAddress) ? "" : $@"
+            <div style='margin: 20px 0;'>
+                <strong>IP地址：</strong> <code style='background-color: #f8f9fa; padding: 2px 6px; border-radius: 3px;'>{ipAddress}</code>
+            </div>")}
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>时间：</strong> {timestamp}<br>
+                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
+                <strong>服务器：</strong> {Environment.MachineName}
+            </div>
+        </div>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
+            此邮件由 VacantRoomWeb 安全监控系统自动发送<br>
+            请勿回复此邮件
+        </div>
+    </div>
+</body>
+</html>";
+        }
+
+        private string FormatSystemNotification(string subject, string message)
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>系统通知</title>
+</head>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #17a2b8; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>📢 系统通知</h1>
+        </div>
+        <div style='padding: 30px;'>
+            <h2 style='color: #17a2b8; margin-top: 0;'>{subject}</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #17a2b8; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>{message}</p>
+            </div>
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>时间：</strong> {timestamp}<br>
+                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
+                <strong>服务器：</strong> {Environment.MachineName}
+            </div>
+        </div>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
+            此邮件由 VacantRoomWeb 系统自动发送<br>
+            请勿回复此邮件
+        </div>
+    </div>
+</body>
+</html>";
+        }
+
+        private string FormatTestEmail()
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>邮件服务测试</title>
+</head>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #28a745; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>✅ 邮件服务测试</h1>
+        </div>
+        <div style='padding: 30px;'>
+            <h2 style='color: #28a745; margin-top: 0;'>测试成功</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>VacantRoomWeb 邮件通知服务运行正常。</p>
+                <p style='margin: 10px 0 0 0; line-height: 1.6;'>如果您收到了这封邮件，说明邮件发送功能已正确配置并可以正常工作。</p>
+            </div>
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>测试时间：</strong> {timestamp}<br>
+                <strong>系统版本：</strong> VacantRoomWeb v1.0.0<br>
+                <strong>服务器：</strong> {Environment.MachineName}<br>
+                <strong>运行环境：</strong> .NET 8 / Blazor Server
+            </div>
+        </div>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
+            此邮件由 VacantRoomWeb 邮件服务测试功能发送<br>
+            请勿回复此邮件
+        </div>
+    </div>
+</body>
+</html>";
+        }
+    }
+}
+
+
+============================================================
+FILE: Services\FileBasedLoggingService.cs
+============================================================
+﻿// Services/FileBasedLoggingService.cs
+using System.Collections.Concurrent;
+using System.Text;
+
+namespace VacantRoomWeb.Services
+{
+    public class FileBasedLoggingService : IDisposable
+    {
+        private readonly string _logDirectory;
+        private readonly object _fileLock = new();
+        private readonly ILogger<FileBasedLoggingService> _logger;
+
+        // 缓存今日日志文件路径，避免重复计算
+        private string _currentLogFilePath;
+        private DateTime _currentLogDate;
+
+        public FileBasedLoggingService(ILogger<FileBasedLoggingService> logger = null)
+        {
+            _logger = logger;
+            _logDirectory = Path.Combine(AppContext.BaseDirectory, "Logs");
+            Directory.CreateDirectory(_logDirectory);
+
+            // 初始化当前日志文件路径
+            UpdateCurrentLogFilePath();
+        }
+
+        public void LogAccess(string ip, string action, string details = "", string userAgent = "", string requestPath = "")
+        {
+            var logEntry = new LogEntry
+            {
+                Timestamp = DateTime.Now,
+                IP = ip,
+                Action = action,
+                Details = details,
+                UserAgent = userAgent,
+                RequestPath = requestPath
+            };
+
+            WriteToFile(logEntry);
+        }
+
+        private void WriteToFile(LogEntry entry)
+        {
+            lock (_fileLock)
+            {
+                try
+                {
+                    // 检查是否需要切换到新的日志文件（跨日期）
+                    if (DateTime.Today != _currentLogDate)
+                    {
+                        UpdateCurrentLogFilePath();
+                    }
+
+                    var logLine = FormatLogEntry(entry);
+
+                    // 使用追加模式写入文件
+                    File.AppendAllText(_currentLogFilePath, logLine + Environment.NewLine, Encoding.UTF8);
+                }
+                catch (Exception ex)
+                {
+                    // 静默处理文件写入错误，避免影响主业务
+                    _logger?.LogError(ex, "写入日志文件失败: {FilePath}", _currentLogFilePath);
+                }
+            }
+        }
+
+        private void UpdateCurrentLogFilePath()
+        {
+            _currentLogDate = DateTime.Today;
+            var fileName = $"access-{_currentLogDate:yyyy-MM-dd}.log";
+            _currentLogFilePath = Path.Combine(_logDirectory, fileName);
+        }
+
+        private string FormatLogEntry(LogEntry entry)
+        {
+            return $"[{entry.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] IP:{entry.IP} ACTION:{entry.Action} PATH:{entry.RequestPath} DETAILS:{entry.Details} UA:{entry.UserAgent}";
+        }
+
+        public List<LogEntry> GetRecentLogs(int count = 100)
+        {
+            var logs = new List<LogEntry>();
+            var today = DateTime.Today;
+
+            // 从今天开始，向前查找日志文件
+            for (int dayOffset = 0; dayOffset <= 7 && logs.Count < count; dayOffset++)
+            {
+                var date = today.AddDays(-dayOffset);
+                var filePath = GetLogFilePath(date);
+
+                if (File.Exists(filePath))
+                {
+                    var fileLogs = ReadLogsFromFile(filePath, count - logs.Count, true);
+                    logs.AddRange(fileLogs);
+                }
+            }
+
+            return logs.OrderByDescending(l => l.Timestamp).Take(count).ToList();
+        }
+
+        public List<LogEntry> GetLogsByDate(DateTime date)
+        {
+            var filePath = GetLogFilePath(date);
+
+            if (!File.Exists(filePath))
+                return new List<LogEntry>();
+
+            return ReadLogsFromFile(filePath, int.MaxValue, false);
+        }
+
+        private List<LogEntry> ReadLogsFromFile(string filePath, int maxCount, bool fromEnd)
+        {
+            var logs = new List<LogEntry>();
+
+            lock (_fileLock)
+            {
+                try
+                {
+                    var lines = File.ReadAllLines(filePath, Encoding.UTF8);
+
+                    if (fromEnd)
+                    {
+                        // 从文件末尾开始读取
+                        for (int i = lines.Length - 1; i >= 0 && logs.Count < maxCount; i--)
+                        {
+                            if (TryParseLogLine(lines[i], out var logEntry))
+                            {
+                                logs.Add(logEntry);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // 从文件开头读取
+                        foreach (var line in lines)
+                        {
+                            if (TryParseLogLine(line, out var logEntry))
+                            {
+                                logs.Add(logEntry);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "读取日志文件失败: {FilePath}", filePath);
+                }
+            }
+
+            return logs;
+        }
+
+        private bool TryParseLogLine(string line, out LogEntry logEntry)
+        {
+            logEntry = new LogEntry();
+
+            try
+            {
+                if (string.IsNullOrEmpty(line) || !line.StartsWith("["))
+                    return false;
+
+                // 解析时间戳
+                var timestampEnd = line.IndexOf(']');
+                if (timestampEnd == -1) return false;
+
+                var timestampStr = line.Substring(1, timestampEnd - 1);
+                if (!DateTime.TryParseExact(timestampStr, "yyyy-MM-dd HH:mm:ss.fff", null, System.Globalization.DateTimeStyles.None, out var timestamp))
+                    return false;
+
+                logEntry.Timestamp = timestamp;
+
+                // 解析其余字段
+                var remainingLine = line.Substring(timestampEnd + 1).Trim();
+                var parts = remainingLine.Split(new[] { " IP:", " ACTION:", " PATH:", " DETAILS:", " UA:" }, StringSplitOptions.None);
+
+                if (parts.Length >= 5)
+                {
+                    logEntry.IP = parts[1];
+                    logEntry.Action = parts[2];
+                    logEntry.RequestPath = parts[3];
+                    logEntry.Details = parts[4];
+
+                    if (parts.Length > 5)
+                    {
+                        logEntry.UserAgent = parts[5];
+                    }
+
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "解析日志行失败: {Line}", line);
+            }
+
+            return false;
+        }
+
+        private string GetLogFilePath(DateTime date)
+        {
+            var fileName = $"access-{date:yyyy-MM-dd}.log";
+            return Path.Combine(_logDirectory, fileName);
+        }
+
+        public List<string> GetAvailableLogDates()
+        {
+            try
+            {
+                return Directory.GetFiles(_logDirectory, "access-*.log")
+                    .Select(f => Path.GetFileName(f))
+                    .Select(f => f.Replace("access-", "").Replace(".log", ""))
+                    .Where(dateStr => DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
+                    .OrderByDescending(d => d)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "获取可用日志日期失败");
+                return new List<string>();
+            }
+        }
+
+        public void ClearRecentLogs()
+        {
+            // 对于文件系统，这个方法可以清空今日的日志文件
+            lock (_fileLock)
+            {
+                try
+                {
+                    if (File.Exists(_currentLogFilePath))
+                    {
+                        File.WriteAllText(_currentLogFilePath, "", Encoding.UTF8);
+                        _logger?.LogInformation("已清空今日日志文件: {FilePath}", _currentLogFilePath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "清空日志文件失败: {FilePath}", _currentLogFilePath);
+                }
+            }
+        }
+
+        public Dictionary<string, object> GetLogStats()
+        {
+            var stats = new Dictionary<string, object>();
+            var today = DateTime.Today;
+
+            try
+            {
+                // 今日日志统计
+                var todayLogs = GetLogsByDate(today);
+                var todayActionGroups = todayLogs.GroupBy(l => l.Action).ToDictionary(g => g.Key, g => g.Count());
+                var todayIpCount = todayLogs.Select(l => l.IP).Distinct().Count();
+
+                stats["TodayLogs"] = todayLogs.Count;
+                stats["TodayUniqueIPs"] = todayIpCount;
+                stats["TodaySecurityEvents"] = todayActionGroups.Where(kvp => kvp.Key.StartsWith("SECURITY_")).Sum(kvp => kvp.Value);
+                stats["TodayAdminEvents"] = todayActionGroups.Where(kvp => kvp.Key.Contains("ADMIN")).Sum(kvp => kvp.Value);
+
+                // 内存日志统计（始终为0，因为不再使用内存）
+                stats["MemoryLogs"] = 0;
+                stats["MemoryUniqueIPs"] = 0;
+                stats["MemorySecurityEvents"] = 0;
+                stats["MemoryAdminEvents"] = 0;
+
+                // 今日日志文件大小
+                var todayFilePath = GetLogFilePath(today);
+                if (File.Exists(todayFilePath))
+                {
+                    var fileInfo = new FileInfo(todayFilePath);
+                    stats["TodayLogFileSize"] = $"{fileInfo.Length / 1024.0:F1} KB";
+                }
+                else
+                {
+                    stats["TodayLogFileSize"] = "0 KB";
+                }
+
+                // 调试信息
+                stats["DebugInfo"] = $"今日文件日志: {todayLogs.Count}";
+                stats["DebugLogDirectory"] = _logDirectory;
+                stats["DebugCurrentTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                stats["DebugTodayDate"] = today.ToString("yyyy-MM-dd");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "获取日志统计失败");
+
+                // 返回基础统计
+                stats["TodayLogs"] = 0;
+                stats["MemoryLogs"] = 0;
+                stats["TodayLogFileSize"] = "0 KB";
+            }
+
+            return stats;
+        }
+
+        public void CleanupOldLogs(int daysToKeep = 30)
+        {
+            try
+            {
+                var cutoffDate = DateTime.Now.AddDays(-daysToKeep);
+                var logFiles = Directory.GetFiles(_logDirectory, "access-*.log");
+
+                foreach (var file in logFiles)
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    var dateStr = fileName.Replace("access-", "");
+
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
+                    {
+                        if (fileDate < cutoffDate)
+                        {
+                            File.Delete(file);
+                            _logger?.LogInformation("删除过期日志文件: {File}", file);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "清理旧日志文件失败");
+            }
+        }
+
+        public List<(string Date, int Count, string Size)> GetLogFileInfo()
+        {
+            var result = new List<(string Date, int Count, string Size)>();
+
+            try
+            {
+                var logFiles = Directory.GetFiles(_logDirectory, "access-*.log");
+
+                foreach (var file in logFiles)
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    var dateStr = fileName.Replace("access-", "");
+
+                    if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var fileDate))
+                    {
+                        var fileInfo = new FileInfo(file);
+                        var lineCount = CountLinesInFile(file);
+                        var size = $"{fileInfo.Length / 1024.0:F1} KB";
+
+                        result.Add((dateStr, lineCount, size));
+                    }
+                }
+
+                return result.OrderByDescending(r => r.Date).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "获取日志文件信息失败");
+                return result;
+            }
+        }
+
+        private int CountLinesInFile(string filePath)
+        {
+            try
+            {
+                return File.ReadAllLines(filePath).Length;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        public void Dispose()
+        {
+            // 文件系统不需要特殊的释放操作
+        }
+    }
+
+    // LogEntry 保持不变
+    public class LogEntry
+    {
+        public DateTime Timestamp { get; set; }
+        public string IP { get; set; } = "";
+        public string Action { get; set; } = "";
+        public string Details { get; set; } = "";
+        public string UserAgent { get; set; } = "";
+        public string RequestPath { get; set; } = "";
+    }
+}
+
+
+============================================================
+FILE: Services\IEmailService.cs
+============================================================
+﻿// Services/IEmailService.cs
+namespace VacantRoomWeb.Services
+{
+    public interface IEmailService
+    {
+        Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null);
+        Task<bool> SendSystemNotificationAsync(string subject, string message);
+        Task<bool> TestEmailServiceAsync();
+        void SendSecurityAlert(string subject, string message);
+        void SendSystemNotification(string subject, string message);
+    }
+}
+
+
+============================================================
+FILE: Services\StartupLoggingService.cs
+============================================================
+﻿// Services/StartupLoggingService.cs
+namespace VacantRoomWeb.Services
+{
+    public interface IStartupLoggingService
+    {
+        void RecordStart();
+        DateTime GetApplicationStartTime();
+        TimeSpan GetUptime();
+        string GetDetailedUptime();
+        StartupInfo GetStartupInfo();
+    }
+
+    public class StartupInfo
+    {
+        public string StartTime { get; set; } = "";
+        public string Uptime { get; set; } = "";
+        public string TotalHours { get; set; } = "";
+        public string Environment { get; set; } = "";
+        public string MachineName { get; set; } = "";
+        public string ProcessorCount { get; set; } = "";
+        public string WorkingSet { get; set; } = "";
+    }
+
+    public class StartupLoggingService : IStartupLoggingService
+    {
+        private readonly DateTime _startTime;
+        private readonly ILogger<StartupLoggingService> _logger;
+
+        public StartupLoggingService(ILogger<StartupLoggingService> logger = null)
+        {
+            _startTime = DateTime.Now;
+            _logger = logger;
+        }
+
+        public void RecordStart()
+        {
+            _logger?.LogInformation("Application started at {StartTime}", _startTime);
+        }
+
+        public DateTime GetApplicationStartTime()
+        {
+            return _startTime;
+        }
+
+        public TimeSpan GetUptime()
+        {
+            return DateTime.Now - _startTime;
+        }
+
+        public string GetDetailedUptime()
+        {
+            var uptime = GetUptime();
+            return $"{uptime.Days}天 {uptime.Hours}小时 {uptime.Minutes}分钟 {uptime.Seconds}秒";
+        }
+
+        public StartupInfo GetStartupInfo()
+        {
+            var uptime = GetUptime();
+
+            return new StartupInfo
+            {
+                StartTime = _startTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                Uptime = GetDetailedUptime(),
+                TotalHours = $"{uptime.TotalHours:F1}",
+                Environment = System.Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown",
+                MachineName = System.Environment.MachineName,
+                ProcessorCount = System.Environment.ProcessorCount.ToString(),
+                WorkingSet = $"{System.Environment.WorkingSet / 1024 / 1024:F0} MB"
+            };
         }
     }
 }
@@ -4494,6 +5687,12 @@ FILE: VacantRoomWeb.csproj
   </ItemGroup>
 
   <ItemGroup>
+    <Content Update="appsettings.Development.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="Data\schedule.xlsx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -4514,9 +5713,27 @@ FILE: appsettings.Development.json
       "Default": "Information",
       "Microsoft.AspNetCore": "Warning"
     }
+  },
+
+  // 开发环境的敏感配置 - 仅用于本地调试
+  "AdminConfig": {
+    "Username": "admin_origami",
+    "PasswordHash": "JZbYNmQ8Yi6IRfEht363YGJgjY5eaB7UsfyggX953KQ=",
+    "Salt": "2BfcmATnJ9qH8oMxrOXqn7JFwQ+mbf5QdGwv76nFmjI=",
+    "SecretKey": "mflfYqSSkeacMKzgcH4faGv6FcpYEme9ssPwUEVplacVPYTgYwvomwGkftir+lqdvPolUbsilnmX97vcXeyqCA=="
+  },
+
+  "Email": {
+    "NotifyHubAPI": {
+      "BaseUrl": "https://notify.origami7023.cn",
+      "ApiKey": "default-api-key-2024"
+    },
+    "DefaultRecipient": "origami7023@gmail.com",
+    "CooldownMinutes": 5,
+    "MaxRetries": 3,
+    "TimeoutSeconds": 30
   }
 }
-
 
 
 ============================================================
@@ -4530,20 +5747,67 @@ FILE: appsettings.json
     }
   },
   "AllowedHosts": "*",
-  "AdminConfig": {
-    "Username": "admin_origami",
-    "PasswordHash": "JZbYNmQ8Yi6IRfEht363YGJgjY5eaB7UsfyggX953KQ=",
-    "Salt": "2BfcmATnJ9qH8oMxrOXqn7JFwQ+mbf5QdGwv76nFmjI=",
-    "SecretKey": "mflfYqSSkeacMKzgcH4faGv6FcpYEme9ssPwUEVplacVPYTgYwvomwGkftir+lqdvPolUbsilnmX97vcXeyqCA=="
+
+  "Application": {
+    "Name": "VacantRoomWeb",
+    "Version": "1.0.0",
+    "Description": "教室查询系统"
   },
+
+  "Security": {
+    "DDoSThreshold": 120,
+    "LoginFailureThreshold": 8,
+    "LoginFailureWindow": 5,
+    "BanDuration": 30,
+    "LockdownDuration": 15
+  },
+
   "Email": {
-    "NotifyHubAPI": {
-      "BaseUrl": "https://notify.origami7023.cn",
-      "ApiKey": "default-api-key-2024"
-    },
-    "DefaultRecipient": "origami7023@gmail.com"
+    "CooldownMinutes": 5,
+    "MaxRetries": 3,
+    "TimeoutSeconds": 30
+  },
+
+  "System": {
+    "RefreshIntervalSeconds": 30,
+    "MaxConnectionsToTrack": 1000
   }
 }
+
+
+============================================================
+FILE: web.config
+============================================================
+﻿<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+	<location path="." inheritInChildApplications="false">
+		<system.webServer>
+			<handlers>
+				<add name="aspNetCore" path="*" verb="*" modules="AspNetCoreModuleV2" resourceType="Unspecified" />
+			</handlers>
+			<aspNetCore processPath="dotnet" arguments=".\VacantRoomWeb.dll" stdoutLogEnabled="false" stdoutLogFile=".\logs\stdout" hostingModel="outofprocess">
+
+				<!-- 生产环境敏感配置 - 通过环境变量设置 -->
+				<environmentVariables>
+					<!-- 管理员配置 -->
+					<environmentVariable name="VACANTROOM_ADMIN_USERNAME" value="admin_origami" />
+					<environmentVariable name="VACANTROOM_ADMIN_PASSWORDHASH" value="JZbYNmQ8Yi6IRfEht363YGJgjY5eaB7UsfyggX953KQ=" />
+					<environmentVariable name="VACANTROOM_ADMIN_SALT" value="2BfcmATnJ9qH8oMxrOXqn7JFwQ+mbf5QdGwv76nFmjI=" />
+					<environmentVariable name="VACANTROOM_ADMIN_SECRETKEY" value="mflfYqSSkeacMKzgcH4faGv6FcpYEme9ssPwUEVplacVPYTgYwvomwGkftir+lqdvPolUbsilnmX97vcXeyqCA==" />
+
+					<!-- 邮件服务配置 -->
+					<environmentVariable name="VACANTROOM_EMAIL_BASEURL" value="https://notify.origami7023.cn" />
+					<environmentVariable name="VACANTROOM_EMAIL_APIKEY" value="nh-prod-7K9mP3xR8wQ2nV5ag4yQWcL8sA9dE3tY7uI2oP6qW1zX5" />
+					<environmentVariable name="VACANTROOM_EMAIL_RECIPIENT" value="origami7023@gmail.com" />
+
+					<!-- 环境标识 -->
+					<environmentVariable name="ASPNETCORE_ENVIRONMENT" value="Production" />
+				</environmentVariables>
+
+			</aspNetCore>
+		</system.webServer>
+	</location>
+</configuration>
 
 
 ============================================================
@@ -4739,5 +6003,5 @@ main {
 
 
 ================================================================================
-END OF CODE FILES
+代码文件结束
 ================================================================================
