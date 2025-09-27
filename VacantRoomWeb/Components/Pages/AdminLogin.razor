@@ -127,47 +127,121 @@
 
     private async Task LoginTest()
     {
-        if (SecurityService.IsAdminPanelLocked())
-        {
-            Message = "⚠️ 管理面板已锁定";
-            StateHasChanged();
-            return;
-        }
-
-        if (string.IsNullOrEmpty(Username) || string.IsNullOrEmpty(Password))
-        {
-            Message = "请输入用户名和密码";
-            StateHasChanged();
-            return;
-        }
+        Message = "开始登录验证...";
+        StateHasChanged();
 
         try
         {
-            var result = AuthService.ValidateCredentials(Username, Password);
+            // 1. 检查各个服务是否正常注入
+            if (AuthService == null)
+            {
+                Message = "错误：AuthService 未注入";
+                StateHasChanged();
+                return;
+            }
+
+            if (SecurityService == null)
+            {
+                Message = "错误：SecurityService 未注入";
+                StateHasChanged();
+                return;
+            }
+
+            Message = "服务注入正常，检查管理面板状态...";
+            StateHasChanged();
+
+            // 2. 检查管理面板是否锁定
+            bool isLocked = false;
+            try
+            {
+                isLocked = SecurityService.IsAdminPanelLocked();
+            }
+            catch (Exception ex)
+            {
+                Message = $"检查管理面板状态时出错：{ex.Message}";
+                StateHasChanged();
+                return;
+            }
+
+            if (isLocked)
+            {
+                Message = "管理面板已锁定";
+                StateHasChanged();
+                return;
+            }
+
+            Message = "管理面板状态正常，检查输入...";
+            StateHasChanged();
+
+            // 3. 检查用户输入
+            if (string.IsNullOrEmpty(Username) || string.IsNullOrEmpty(Password))
+            {
+                Message = "请输入用户名和密码";
+                StateHasChanged();
+                return;
+            }
+
+            Message = "输入验证通过，开始验证凭据...";
+            StateHasChanged();
+
+            // 4. 验证凭据
+            // 4. 验证凭据
+            bool result = false;
+            try
+            {
+                // 添加调试信息
+                Message = $"正在验证用户名: '{Username}' 和密码...";
+                StateHasChanged();
+                await Task.Delay(500); // 让用户看到这条消息
+
+                result = AuthService.ValidateCredentials(Username, Password);
+            }
+            catch (Exception ex)
+            {
+                Message = $"验证凭据时出错：{ex.Message}\n\n堆栈跟踪：{ex.StackTrace}";
+                StateHasChanged();
+                return;
+            }
+
+            Message = $"凭据验证结果：{(result ? "成功" : "失败")}";
+            StateHasChanged();
 
             if (result)
             {
                 try
                 {
+                    Message = "凭据验证成功，设置认证Cookie...";
+                    StateHasChanged();
+
                     await AuthService.SetAuthCookieAsync(Username, JSRuntime);
+
+                    Message = "Cookie设置成功，准备跳转...";
+                    StateHasChanged();
+
+                    await Task.Delay(500);
                     Navigation.NavigateTo("/admin", forceLoad: true);
                 }
                 catch (Exception cookieEx)
                 {
-                    Message = $"Cookie设置失败: {cookieEx.Message}";
+                    Message = $"Cookie设置失败: {cookieEx.Message}\n\n堆栈跟踪：{cookieEx.StackTrace}";
                     StateHasChanged();
                     return;
                 }
             }
             else
             {
-                Message = "登录失败";
+                Message = "登录失败：用户名或密码错误";
                 Password = "";
             }
         }
         catch (Exception ex)
         {
-            Message = $"登录异常: {ex.Message}";
+            Message = $"登录过程中发生未知错误：\n错误信息：{ex.Message}\n\n错误类型：{ex.GetType().Name}\n\n堆栈跟踪：{ex.StackTrace}";
+
+            if (ex.InnerException != null)
+            {
+                Message += $"\n\n内部异常：{ex.InnerException.Message}";
+            }
         }
 
         StateHasChanged();

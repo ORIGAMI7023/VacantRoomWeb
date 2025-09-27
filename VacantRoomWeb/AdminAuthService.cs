@@ -30,16 +30,48 @@ namespace VacantRoomWeb
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
             var userAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString() ?? "";
 
-            var adminConfig = _configService.GetAdminConfig();
-
-            if (string.IsNullOrEmpty(adminConfig.Username))
+            // 检查配置服务是否可用
+            if (_configService == null)
             {
-                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration not found", userAgent);
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Configuration service is null", userAgent);
                 return false;
             }
 
-            bool isValid = adminConfig.Username == username &&
-                          VerifyPassword(password, adminConfig.PasswordHash, adminConfig.Salt);
+            var adminConfig = _configService.GetAdminConfig();
+
+            if (adminConfig == null)
+            {
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration not found or incomplete", userAgent);
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(adminConfig.Username))
+            {
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin username is empty", userAgent);
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(adminConfig.PasswordHash))
+            {
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin password hash is empty", userAgent);
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(adminConfig.Salt))
+            {
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin salt is empty", userAgent);
+                return false;
+            }
+
+            // 详细的验证调试
+            bool usernameMatch = adminConfig.Username == username;
+            bool passwordMatch = VerifyPassword(password, adminConfig.PasswordHash, adminConfig.Salt);
+            bool isValid = usernameMatch && passwordMatch;
+
+            // 记录详细的验证信息（用于调试，生产环境应移除）
+            _logger.LogAccess(ip, "ADMIN_LOGIN_DEBUG",
+                $"Username: '{username}' vs Config: '{adminConfig.Username}' Match: {usernameMatch}, Password Match: {passwordMatch}",
+                userAgent);
 
             // Always check with security service to track attempts
             _securityService.CheckLoginAttempt(ip, isValid, userAgent);

@@ -15,6 +15,9 @@ builder.Services.AddSignalR(options =>
     options.EnableDetailedErrors = true;
 });
 
+// Register HttpContextAccessor first (critical for other services)
+builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
 // Register configuration service first (other services depend on it)
 builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
 
@@ -24,7 +27,6 @@ builder.Services.AddHttpClient<IEmailService, EmailService>();
 // Register existing services
 builder.Services.AddSingleton<ConnectionCounterService>();
 builder.Services.AddSingleton<ClientConnectionTracker>();
-builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 // Register new security and logging services
 builder.Services.AddSingleton<EnhancedLoggingService>();

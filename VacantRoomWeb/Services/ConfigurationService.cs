@@ -34,16 +34,45 @@ namespace VacantRoomWeb.Services
             try
             {
                 var config = new AdminConfig();
-                _configuration.GetSection("AdminConfig").Bind(config);
 
+                // 优先从环境变量读取（生产环境）
+                config.Username = _configuration["VACANTROOM_ADMIN_USERNAME"];
+                config.PasswordHash = _configuration["VACANTROOM_ADMIN_PASSWORDHASH"];
+                config.Salt = _configuration["VACANTROOM_ADMIN_SALT"];
+                config.SecretKey = _configuration["VACANTROOM_ADMIN_SECRETKEY"];
+
+                // 如果环境变量不存在，尝试从配置文件读取（开发环境）
+                if (string.IsNullOrEmpty(config.Username))
+                {
+                    var adminSection = _configuration.GetSection("AdminConfig");
+                    if (adminSection.Exists())
+                    {
+                        adminSection.Bind(config);
+                        _logger?.LogInformation("Admin config loaded from appsettings.json");
+                    }
+                    else
+                    {
+                        _logger?.LogWarning("AdminConfig section not found and no environment variables");
+                        return null;
+                    }
+                }
+                else
+                {
+                    _logger?.LogInformation("Admin config loaded from environment variables");
+                }
+
+                // 验证配置完整性
                 if (string.IsNullOrEmpty(config.Username) ||
                     string.IsNullOrEmpty(config.PasswordHash) ||
                     string.IsNullOrEmpty(config.Salt))
                 {
-                    _logger?.LogWarning("Admin configuration is incomplete");
+                    _logger?.LogWarning($"Admin configuration is incomplete - Username: '{config.Username}', " +
+                        $"PasswordHash: {!string.IsNullOrEmpty(config.PasswordHash)}, " +
+                        $"Salt: {!string.IsNullOrEmpty(config.Salt)}");
                     return null;
                 }
 
+                _logger?.LogInformation("Admin configuration loaded successfully");
                 return config;
             }
             catch (Exception ex)
