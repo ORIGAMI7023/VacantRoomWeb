@@ -1,4 +1,4 @@
-﻿namespace VacantRoomWeb
+﻿namespace VacantRoomWeb.Services
 {
     public class NotificationService
     {

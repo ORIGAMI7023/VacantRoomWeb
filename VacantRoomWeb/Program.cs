@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using VacantRoomWeb;
 using VacantRoomWeb.Components;
+using VacantRoomWeb.Handlers;
+using VacantRoomWeb.Middleware;
 using VacantRoomWeb.Services;
 
 var builder = WebApplication.CreateBuilder(args);

@@ -1,6 +1,8 @@
 ﻿// Services/FileBasedLoggingService.cs
 using System.Collections.Concurrent;
+using System.Net.NetworkInformation;
 using System.Text;
+using VacantRoomWeb.Models;
 
 namespace VacantRoomWeb.Services
 {
@@ -369,16 +371,5 @@ namespace VacantRoomWeb.Services
         {
             // 文件系统不需要特殊的释放操作
         }
-    }
-
-    // LogEntry 保持不变
-    public class LogEntry
-    {
-        public DateTime Timestamp { get; set; }
-        public string IP { get; set; } = "";
-        public string Action { get; set; } = "";
-        public string Details { get; set; } = "";
-        public string UserAgent { get; set; } = "";
-        public string RequestPath { get; set; } = "";
     }
 }

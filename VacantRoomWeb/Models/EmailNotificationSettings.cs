@@ -1,5 +1,5 @@
 ﻿// EmailNotificationSettings.cs
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Models
 {
     public class EmailNotificationSettings
     {

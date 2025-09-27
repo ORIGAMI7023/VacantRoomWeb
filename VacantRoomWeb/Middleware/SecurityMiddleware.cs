@@ -1,4 +1,6 @@
-﻿namespace VacantRoomWeb
+﻿using VacantRoomWeb.Services;
+
+namespace VacantRoomWeb.Middleware
 {
     public class SecurityMiddleware
     {

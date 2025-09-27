@@ -1,5 +1,5 @@
 ================================================================================
-打包时间: 2025年09月27日 21:54
+打包时间: 2025年09月27日 22:27
 VACANTROOM WEB PROJECT - ALL CODE FILES
 ================================================================================
 
@@ -39,11 +39,26 @@ namespace VacantRoomWeb
             var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
             var userAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString() ?? "";
 
+            // 检查配置服务是否可用
+            if (_configService == null)
+            {
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Configuration service is null", userAgent);
+                return false;
+            }
+
             var adminConfig = _configService.GetAdminConfig();
 
-            if (string.IsNullOrEmpty(adminConfig.Username))
+            if (adminConfig == null)
             {
-                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration not found", userAgent);
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration not found or incomplete", userAgent);
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(adminConfig.Username) ||
+                string.IsNullOrEmpty(adminConfig.PasswordHash) ||
+                string.IsNullOrEmpty(adminConfig.Salt))
+            {
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration is incomplete", userAgent);
                 return false;
             }
 
@@ -246,106 +261,6 @@ namespace VacantRoomWeb
 
 
 ============================================================
-FILE: ApplicationStartupService.cs
-============================================================
-﻿using VacantRoomWeb.Services;
-
-namespace VacantRoomWeb
-{
-    /// <summary>
-    /// 兼容性适配器 - 保持现有代码的接口不变
-    /// 内部委托给基于文件的 StartupLoggingService
-    /// </summary>
-    public class ApplicationStartupService
-    {
-        private readonly IStartupLoggingService _startupLoggingService;
-
-        public ApplicationStartupService(IStartupLoggingService startupLoggingService)
-        {
-            _startupLoggingService = startupLoggingService;
-        }
-
-        public DateTime GetApplicationStartTime()
-        {
-            return _startupLoggingService.GetApplicationStartTime();
-        }
-
-        public string GetUptime()
-        {
-            var uptime = _startupLoggingService.GetUptime();
-            return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
-        }
-
-        public string GetDetailedUptime()
-        {
-            return _startupLoggingService.GetDetailedUptime();
-        }
-
-        /// <summary>
-        /// 获取应用程序启动相关信息
-        /// </summary>
-        public Dictionary<string, string> GetStartupInfo()
-        {
-            var startupInfo = _startupLoggingService.GetStartupInfo();
-
-            return new Dictionary<string, string>
-            {
-                ["StartTime"] = startupInfo.StartTime,
-                ["Uptime"] = startupInfo.Uptime,
-                ["TotalHours"] = startupInfo.TotalHours,
-                ["Environment"] = startupInfo.Environment,
-                ["MachineName"] = startupInfo.MachineName,
-                ["ProcessorCount"] = startupInfo.ProcessorCount,
-                ["WorkingSet"] = startupInfo.WorkingSet
-            };
-        }
-    }
-}
-
-
-============================================================
-FILE: ClientConnectionTracker.cs
-============================================================
-﻿namespace VacantRoomWeb
-{
-    /// <summary>
-    /// 用于在用户连接时记录 IP，在断开时查出对应 IP
-    /// </summary>
-    public class ClientConnectionTracker
-    {
-        private readonly Dictionary<string, string> _ipMap = new();
-        private readonly object _lock = new();
-
-        public void SetClientIp(string circuitId, string ip)
-        {
-            lock (_lock)
-            {
-                _ipMap[circuitId] = ip;
-            }
-        }
-
-        public string? GetClientIp(string circuitId)
-        {
-            lock (_lock)
-            {
-                return _ipMap.TryGetValue(circuitId, out var ip) ? ip : null;
-            }
-        }
-
-        public void Remove(string circuitId)
-        {
-            lock (_lock)
-            {
-                _ipMap.Remove(circuitId);
-            }
-        }
-    }
-
-}
-
-
-
-============================================================
 FILE: Components\App.razor
 ============================================================
 ﻿<!DOCTYPE html>
@@ -514,7 +429,12 @@ main {
 ============================================================
 FILE: Components\Layout\NavMenu.razor
 ============================================================
-﻿<div class="top-row ps-3 navbar navbar-dark">
+﻿<div class="nav-item px-3">
+    <NavLink class="nav-link" href="/admin">
+        <span class="oi oi-cog" aria-hidden="true"></span> 管理后台
+    </NavLink>
+</div>
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">VacantRoomWeb</a>
     </div>
@@ -527,6 +447,11 @@ FILE: Components\Layout\NavMenu.razor
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="">
                 <span class="oi oi-list-rich" aria-hidden="true"></span> 空教室查询
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/admin">
+                <span class="oi oi-cog" aria-hidden="true"></span> 管理后台
             </NavLink>
         </div>
     </nav>
@@ -658,6 +583,7 @@ FILE: Components\Pages\AdminDashboard.razor
 @inject ApplicationStartupService StartupService
 @inject IEmailService EmailService
 @inject IConfiguration Configuration
+@using VacantRoomWeb.Models
 @using VacantRoomWeb.Services
 
 <PageTitle>管理后台</PageTitle>
@@ -2995,7 +2921,651 @@ FILE: Components\_Imports.razor
 
 
 ============================================================
-FILE: ConnectionCounterService.cs
+FILE: PasswordHashGenerator.cs
+============================================================
+﻿namespace VacantRoomWeb
+{
+    /// <summary>
+    /// Utility class to generate password hashes for admin configuration
+    /// Run this once to generate hash and salt, then add to appsettings.json
+    /// </summary>
+    public static class PasswordHashGenerator
+    {
+        /// <summary>
+        /// Generate password hash and salt for a given password
+        /// Usage: var result = PasswordHashGenerator.GenerateHash("your_admin_password");
+        /// </summary>
+        public static (string hash, string salt) GenerateHash(string password)
+        {
+            return AdminAuthService.CreatePasswordHash(password);
+        }
+
+        /// <summary>
+        /// Console application to generate admin password hash
+        /// Uncomment and run this method to generate your admin credentials
+        /// </summary>
+        /*
+        public static void Main(string[] args)
+        {
+            Console.WriteLine("Admin Password Hash Generator");
+            Console.WriteLine("============================");
+            
+            Console.Write("Enter admin password: ");
+            var password = Console.ReadLine();
+            
+            if (string.IsNullOrEmpty(password))
+            {
+                Console.WriteLine("Password cannot be empty!");
+                return;
+            }
+            
+            var (hash, salt) = GenerateHash(password);
+            
+            Console.WriteLine("\nGenerated credentials:");
+            Console.WriteLine($"Password Hash: {hash}");
+            Console.WriteLine($"Salt: {salt}");
+            
+            Console.WriteLine("\nAdd these to your appsettings.json:");
+            Console.WriteLine("\"AdminConfig\": {");
+            Console.WriteLine("  \"Username\": \"admin\",");
+            Console.WriteLine($"  \"PasswordHash\": \"{hash}\",");
+            Console.WriteLine($"  \"Salt\": \"{salt}\",");
+            Console.WriteLine("  \"SecretKey\": \"your_secret_key_for_auth_tokens\"");
+            Console.WriteLine("}");
+            
+            Console.WriteLine("\nPress any key to exit...");
+            Console.ReadKey();
+        }
+        */
+    }
+}
+
+
+============================================================
+FILE: Program.cs
+============================================================
+using Microsoft.AspNetCore.Components.Server.Circuits;
+using VacantRoomWeb;
+using VacantRoomWeb.Components;
+using VacantRoomWeb.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Blazor services
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = null;
+    options.EnableDetailedErrors = true;
+});
+
+// Register HttpContextAccessor first (critical for other services)
+builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
+// Register configuration service first (other services depend on it)
+builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
+
+// Register HttpClient for EmailService
+builder.Services.AddHttpClient<IEmailService, EmailService>();
+
+// Register existing services
+builder.Services.AddSingleton<ConnectionCounterService>();
+builder.Services.AddSingleton<ClientConnectionTracker>();
+
+// Register new security and logging services
+builder.Services.AddSingleton<EnhancedLoggingService>();
+builder.Services.AddSingleton<IStartupLoggingService, StartupLoggingService>();
+builder.Services.AddSingleton<ApplicationStartupService>(provider =>
+    new ApplicationStartupService(provider.GetRequiredService<IStartupLoggingService>()));
+
+// Register security and other services
+builder.Services.AddSingleton<SecurityService>();
+builder.Services.AddSingleton<AdminAuthService>();
+
+// Register notification service for component communication
+builder.Services.AddSingleton<NotificationService>();
+
+// Register updated services with new dependencies
+builder.Services.AddSingleton<VacantRoomService>();
+builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
+
+var app = builder.Build();
+
+// 记录应用程序启动
+var startupService = app.Services.GetRequiredService<IStartupLoggingService>();
+startupService.RecordStart();
+
+// Configure the HTTP request pipeline
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    app.UseHsts();
+}
+
+app.UseHttpsRedirection();
+app.UseStaticFiles();
+
+// Add domain routing middleware FIRST
+app.UseMiddleware<DomainRoutingMiddleware>();
+
+// Add security middleware AFTER domain routing
+app.UseMiddleware<SecurityMiddleware>();
+
+app.UseAntiforgery();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.Run();
+
+
+============================================================
+FILE: Properties\launchSettings.json
+============================================================
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:5000",
+      "sslPort": 5001
+    }
+  },
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:5001;http://localhost:5000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "IIS Express": {
+      "commandName": "IISExpress",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
+
+
+============================================================
+FILE: SecurityService.cs
+============================================================
+﻿// SecurityService.cs - 修复版本
+using System.Collections.Concurrent;
+using VacantRoomWeb.Services; // 添加这行来引用邮件服务
+
+namespace VacantRoomWeb
+{
+    public class SecurityEvent
+    {
+        public DateTime Timestamp { get; set; }
+        public string IP { get; set; } = "";
+        public string EventType { get; set; } = "";
+        public string Details { get; set; } = "";
+    }
+
+    public class SecurityService
+    {
+        private readonly EnhancedLoggingService _logger;
+        private readonly IEmailService _emailService;
+
+        // IP tracking for rate limiting
+        private readonly ConcurrentDictionary<string, List<DateTime>> _ipRequests = new();
+        private readonly ConcurrentDictionary<string, List<DateTime>> _loginAttempts = new();
+        private readonly ConcurrentDictionary<string, DateTime> _bannedIPs = new();
+
+        // System-wide security tracking
+        private readonly List<DateTime> _recentBreachAttempts = new();
+        private DateTime? _adminPanelLockdownUntil = null;
+        private DateTime _lastEmailSent = DateTime.MinValue;
+
+        private readonly object _lockObject = new();
+
+        public SecurityService(EnhancedLoggingService logger, IEmailService emailService)
+        {
+            _logger = logger;
+            _emailService = emailService;
+        }
+
+        public bool IsIPBanned(string ip)
+        {
+            if (_bannedIPs.TryGetValue(ip, out var banTime))
+            {
+                if (DateTime.Now < banTime)
+                {
+                    return true;
+                }
+                else
+                {
+                    _bannedIPs.TryRemove(ip, out _);
+                }
+            }
+            return false;
+        }
+
+        public bool IsAdminPanelLocked()
+        {
+            if (_adminPanelLockdownUntil.HasValue && DateTime.Now < _adminPanelLockdownUntil.Value)
+            {
+                return true;
+            }
+            else
+            {
+                _adminPanelLockdownUntil = null;
+                return false;
+            }
+        }
+
+        public bool CheckRateLimit(string ip, string userAgent = "")
+        {
+            lock (_lockObject)
+            {
+                var now = DateTime.Now;
+                var oneMinuteAgo = now.AddMinutes(-1);
+
+                // Clean old requests
+                _ipRequests.AddOrUpdate(ip, new List<DateTime> { now }, (key, list) =>
+                {
+                    list.RemoveAll(time => time < oneMinuteAgo);
+                    list.Add(now);
+                    return list;
+                });
+
+                var requestCount = _ipRequests[ip].Count;
+
+                // 优化的DDoS检测：更宽松的阈值
+                // 考虑到Blazor应用的特点，提高到120次/分钟
+                if (requestCount > 120)
+                {
+                    BanIP(ip, TimeSpan.FromMinutes(15), "DDoS_DETECTED"); // 减少到15分钟
+                    _logger.LogAccess(ip, "SECURITY_DDOS_DETECTED", $"Requests in 1min: {requestCount}", userAgent);
+
+                    // 异步发送邮件警报
+                    _ = Task.Run(async () =>
+                    {
+                        await TriggerEmailAlertAsync("DDoS Attack Detected",
+                            $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.", ip);
+                    });
+
+                    return false;
+                }
+
+                // 警告阈值：80次/分钟时记录但不封禁
+                if (requestCount > 80)
+                {
+                    _logger.LogAccess(ip, "SECURITY_HIGH_REQUEST_RATE", $"High request rate: {requestCount}/min", userAgent);
+                }
+
+                return true;
+            }
+        }
+
+        public bool CheckLoginAttempt(string ip, bool successful, string userAgent = "")
+        {
+            lock (_lockObject)
+            {
+                var now = DateTime.Now;
+                var fiveMinutesAgo = now.AddMinutes(-5); // 扩展到5分钟窗口
+                var tenMinutesAgo = now.AddMinutes(-10);
+
+                if (successful)
+                {
+                    // Clear failed attempts on successful login
+                    _loginAttempts.TryRemove(ip, out _);
+                    _logger.LogAccess(ip, "ADMIN_LOGIN_SUCCESS", "", userAgent);
+                    return true;
+                }
+
+                // Track failed attempts (使用5分钟窗口而不是1分钟)
+                _loginAttempts.AddOrUpdate(ip, new List<DateTime> { now }, (key, list) =>
+                {
+                    list.RemoveAll(time => time < fiveMinutesAgo);
+                    list.Add(now);
+                    return list;
+                });
+
+                var failedCount = _loginAttempts[ip].Count;
+
+                // 优化的暴力破解检测：5分钟内8次失败才封禁
+                if (failedCount >= 8)
+                {
+                    BanIP(ip, TimeSpan.FromMinutes(30), "BRUTE_FORCE_DETECTED"); // 减少到30分钟
+                    _logger.LogAccess(ip, "SECURITY_BRUTE_FORCE_DETECTED", $"Failed login attempts: {failedCount} in 5min", userAgent);
+
+                    // Track for system-wide lockdown
+                    _recentBreachAttempts.RemoveAll(time => time < tenMinutesAgo);
+                    _recentBreachAttempts.Add(now);
+
+                    // 异步发送邮件警报
+                    _ = Task.Run(async () =>
+                    {
+                        await TriggerEmailAlertAsync("Brute Force Attack Detected",
+                            $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.", ip);
+                    });
+
+                    // 系统锁定：10分钟内5个不同IP的暴力破解
+                    var recentUniqueAttackers = _loginAttempts
+                        .Where(kvp => kvp.Value.Any(time => time > tenMinutesAgo))
+                        .Count();
+
+                    if (recentUniqueAttackers >= 5)
+                    {
+                        _adminPanelLockdownUntil = now.AddMinutes(15); // 减少到15分钟
+                        _logger.LogAccess(ip, "SECURITY_ADMIN_LOCKDOWN", $"Admin panel locked for 15 minutes due to {recentUniqueAttackers} attackers", userAgent);
+
+                        // 异步发送系统锁定警报
+                        _ = Task.Run(async () =>
+                        {
+                            await TriggerEmailAlertAsync("CRITICAL: Admin Panel Locked",
+                                $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}", ip);
+                        });
+                    }
+
+                    return false;
+                }
+
+                // 警告阈值：5分钟内5次失败时记录警告
+                if (failedCount >= 5)
+                {
+                    _logger.LogAccess(ip, "SECURITY_LOGIN_WARNING", $"Multiple failed attempts: {failedCount}/8 in 5min", userAgent);
+                }
+
+                _logger.LogAccess(ip, "ADMIN_LOGIN_FAILED", $"Attempt {failedCount}/8 in 5min", userAgent);
+                return true;
+            }
+        }
+
+        private void BanIP(string ip, TimeSpan duration, string reason)
+        {
+            var banUntil = DateTime.Now.Add(duration);
+            _bannedIPs.AddOrUpdate(ip, banUntil, (key, oldTime) => banUntil);
+
+            _logger.LogAccess(ip, "SECURITY_IP_BANNED", $"Reason: {reason}, Duration: {duration.TotalMinutes} minutes");
+        }
+
+        // 更新为异步邮件警报方法
+        private async Task TriggerEmailAlertAsync(string subject, string message, string ipAddress = null)
+        {
+            var now = DateTime.Now;
+
+            // Rate limit emails: max 1 every 15 minutes
+            if (now.Subtract(_lastEmailSent).TotalMinutes >= 15)
+            {
+                _lastEmailSent = now;
+
+                try
+                {
+                    await _emailService.SendSecurityAlertAsync(subject, message, ipAddress);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogAccess("SYSTEM", "EMAIL_ALERT_FAILED", $"Failed to send email: {ex.Message}");
+                }
+            }
+        }
+
+        // 保持原有同步方法以保证兼容性
+        private void TriggerEmailAlert(string subject, string message)
+        {
+            var now = DateTime.Now;
+
+            // Rate limit emails: max 1 every 15 minutes (更频繁的通知)
+            if (now.Subtract(_lastEmailSent).TotalMinutes >= 15)
+            {
+                _lastEmailSent = now;
+                _emailService.SendSecurityAlert(subject, message);
+            }
+        }
+
+        public List<SecurityEvent> GetRecentSecurityEvents(int count = 50)
+        {
+            var events = new List<SecurityEvent>();
+            var recentLogs = _logger.GetRecentLogs(count * 2);
+
+            foreach (var log in recentLogs.Where(l => l.Action.StartsWith("SECURITY_") || l.Action.Contains("LOGIN")))
+            {
+                events.Add(new SecurityEvent
+                {
+                    Timestamp = log.Timestamp,
+                    IP = log.IP,
+                    EventType = log.Action,
+                    Details = log.Details
+                });
+            }
+
+            return events.OrderByDescending(e => e.Timestamp).Take(count).ToList();
+        }
+
+        public Dictionary<string, object> GetSecurityStats()
+        {
+            lock (_lockObject)
+            {
+                var now = DateTime.Now;
+                var oneDayAgo = now.AddDays(-1);
+
+                return new Dictionary<string, object>
+                {
+                    ["TotalBannedIPs"] = _bannedIPs.Count(kvp => kvp.Value > now),
+                    ["AdminPanelLocked"] = IsAdminPanelLocked(),
+                    ["LockdownUntil"] = _adminPanelLockdownUntil?.ToString("yyyy-MM-dd HH:mm:ss") ?? "未锁定",
+                    ["RecentBreachAttempts"] = _recentBreachAttempts.Count(t => t > oneDayAgo),
+                    ["ActiveIPTracking"] = _ipRequests.Count
+                };
+            }
+        }
+
+        // 新增：手动解封IP的方法
+        public bool UnbanIP(string ip)
+        {
+            return _bannedIPs.TryRemove(ip, out _);
+        }
+
+        // 新增：获取当前被封禁的IP列表
+        public List<(string IP, DateTime BanUntil, TimeSpan Remaining)> GetBannedIPs()
+        {
+            var now = DateTime.Now;
+            return _bannedIPs
+                .Where(kvp => kvp.Value > now)
+                .Select(kvp => (kvp.Key, kvp.Value, kvp.Value - now))
+                .OrderBy(item => item.Item2)
+                .ToList();
+        }
+
+        // 新增：清除过期的封禁记录
+        public void CleanupExpiredBans()
+        {
+            var now = DateTime.Now;
+            var expiredIPs = _bannedIPs
+                .Where(kvp => kvp.Value <= now)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var ip in expiredIPs)
+            {
+                _bannedIPs.TryRemove(ip, out _);
+            }
+        }
+    }
+}
+
+
+============================================================
+FILE: Services\ApplicationStartupService.cs
+============================================================
+﻿namespace VacantRoomWeb.Services
+{
+    /// <summary>
+    /// 兼容性适配器 - 保持现有代码的接口不变
+    /// 内部委托给基于文件的 StartupLoggingService
+    /// </summary>
+    public class ApplicationStartupService
+    {
+        private readonly IStartupLoggingService _startupLoggingService;
+
+        public ApplicationStartupService(IStartupLoggingService startupLoggingService)
+        {
+            _startupLoggingService = startupLoggingService;
+        }
+
+        public DateTime GetApplicationStartTime()
+        {
+            return _startupLoggingService.GetApplicationStartTime();
+        }
+
+        public string GetUptime()
+        {
+            var uptime = _startupLoggingService.GetUptime();
+            return $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m";
+        }
+
+        public string GetDetailedUptime()
+        {
+            return _startupLoggingService.GetDetailedUptime();
+        }
+
+        /// <summary>
+        /// 获取应用程序启动相关信息
+        /// </summary>
+        public Dictionary<string, string> GetStartupInfo()
+        {
+            var startupInfo = _startupLoggingService.GetStartupInfo();
+
+            return new Dictionary<string, string>
+            {
+                ["StartTime"] = startupInfo.StartTime,
+                ["Uptime"] = startupInfo.Uptime,
+                ["TotalHours"] = startupInfo.TotalHours,
+                ["Environment"] = startupInfo.Environment,
+                ["MachineName"] = startupInfo.MachineName,
+                ["ProcessorCount"] = startupInfo.ProcessorCount,
+                ["WorkingSet"] = startupInfo.WorkingSet
+            };
+        }
+    }
+}
+
+
+============================================================
+FILE: Services\ConfigurationService.cs
+============================================================
+﻿// Services/ConfigurationService.cs
+namespace VacantRoomWeb.Services
+{
+    public class AdminConfig
+    {
+        public string Username { get; set; } = "";
+        public string PasswordHash { get; set; } = "";
+        public string Salt { get; set; } = "";
+        public string SecretKey { get; set; } = "";
+    }
+
+    public interface IConfigurationService
+    {
+        AdminConfig? GetAdminConfig();
+        string GetEmailApiUrl();
+        string GetEmailApiKey();
+        string GetDefaultRecipient();
+        int GetEmailCooldownMinutes();
+    }
+
+    public class ConfigurationService : IConfigurationService
+    {
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<ConfigurationService> _logger;
+
+        public ConfigurationService(IConfiguration configuration, ILogger<ConfigurationService> logger = null)
+        {
+            _configuration = configuration;
+            _logger = logger;
+        }
+
+        public AdminConfig? GetAdminConfig()
+        {
+            try
+            {
+                var config = new AdminConfig();
+
+                // 优先从环境变量读取（生产环境）
+                config.Username = _configuration["VACANTROOM_ADMIN_USERNAME"];
+                config.PasswordHash = _configuration["VACANTROOM_ADMIN_PASSWORDHASH"];
+                config.Salt = _configuration["VACANTROOM_ADMIN_SALT"];
+                config.SecretKey = _configuration["VACANTROOM_ADMIN_SECRETKEY"];
+
+                // 如果环境变量不存在，尝试从配置文件读取（开发环境）
+                if (string.IsNullOrEmpty(config.Username))
+                {
+                    var adminSection = _configuration.GetSection("AdminConfig");
+                    if (adminSection.Exists())
+                    {
+                        adminSection.Bind(config);
+                    }
+                    else
+                    {
+                        _logger?.LogWarning("Admin configuration not found in environment variables or appsettings");
+                        return null;
+                    }
+                }
+
+                // 验证配置完整性
+                if (string.IsNullOrEmpty(config.Username) ||
+                    string.IsNullOrEmpty(config.PasswordHash) ||
+                    string.IsNullOrEmpty(config.Salt))
+                {
+                    _logger?.LogWarning("Admin configuration is incomplete");
+                    return null;
+                }
+
+                return config;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to load admin configuration");
+                return null;
+            }
+        }
+
+        public string GetEmailApiUrl()
+        {
+            return _configuration["Email:NotifyHubAPI:BaseUrl"] ?? "";
+        }
+
+        public string GetEmailApiKey()
+        {
+            return _configuration["Email:NotifyHubAPI:ApiKey"] ?? "";
+        }
+
+        public string GetDefaultRecipient()
+        {
+            return _configuration["Email:DefaultRecipient"] ?? "";
+        }
+
+        public int GetEmailCooldownMinutes()
+        {
+            return _configuration.GetValue<int>("Email:CooldownMinutes", 5);
+        }
+    }
+}
+
+
+============================================================
+FILE: Services\ConnectionCounterService.cs
 ============================================================
 ﻿namespace VacantRoomWeb
 {
@@ -3027,246 +3597,297 @@ FILE: ConnectionCounterService.cs
 
 
 ============================================================
-FILE: ConnectionLoggingCircuitHandler.cs
+FILE: Services\EmailService.cs
 ============================================================
-﻿using Microsoft.AspNetCore.Components.Server.Circuits;
+﻿// Services/EmailService.cs
+using System.Text;
+using System.Text.Json;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Services
 {
-    public class ConnectionLoggingCircuitHandler : CircuitHandler
+    public class EmailService : IEmailService
     {
-        private readonly ConnectionCounterService _counter;
-        private readonly ClientConnectionTracker _ipTracker;
-        private readonly IHttpContextAccessor _httpContextAccessor;
-        private readonly EnhancedLoggingService _logger;
+        private readonly HttpClient _httpClient;
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<EmailService> _logger;
+        private readonly Dictionary<string, DateTime> _lastSentTimes = new();
+        private readonly object _cooldownLock = new();
 
-        // 用于跟踪每个IP的连接情况，避免重复记录
-        private static readonly Dictionary<string, DateTime> _lastLoggedConnection = new();
-        private static readonly object _logLock = new();
-
-        public ConnectionLoggingCircuitHandler(
-            ConnectionCounterService counter,
-            ClientConnectionTracker ipTracker,
-            IHttpContextAccessor httpContextAccessor,
-            EnhancedLoggingService logger)
+        public EmailService(HttpClient httpClient, IConfiguration configuration, ILogger<EmailService> logger)
         {
-            _counter = counter;
-            _ipTracker = ipTracker;
-            _httpContextAccessor = httpContextAccessor;
+            _httpClient = httpClient;
+            _configuration = configuration;
             _logger = logger;
+
+            ConfigureHttpClient();
         }
 
-        public override Task OnConnectionUpAsync(Circuit circuit, CancellationToken cancellationToken)
+        private void ConfigureHttpClient()
         {
-            var ip = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
-            var userAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString() ?? "";
+            var timeoutSeconds = _configuration.GetValue<int>("Email:TimeoutSeconds", 30);
+            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        }
 
-            _ipTracker.SetClientIp(circuit.Id, ip);
-
-            var count = _counter.Increment();
-
-            // 智能记录：同一IP在30秒内的多次连接只记录一次
-            lock (_logLock)
+        public async Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null)
+        {
+            if (!CheckCooldown("security_alert"))
             {
-                var now = DateTime.Now;
-                var shouldLog = false;
-
-                if (!_lastLoggedConnection.ContainsKey(ip))
-                {
-                    shouldLog = true;
-                }
-                else if (now.Subtract(_lastLoggedConnection[ip]).TotalSeconds > 30)
-                {
-                    shouldLog = true;
-                }
-
-                if (shouldLog)
-                {
-                    _lastLoggedConnection[ip] = now;
-                    _logger.LogAccess(ip, "BLAZOR_CONNECTION_UP", $"Active connections: {count}", TruncateUserAgent(userAgent));
-
-                    // 清理旧的记录（避免内存泄漏）
-                    CleanupOldConnections();
-                }
+                _logger.LogWarning("Security alert email skipped due to cooldown");
+                return false;
             }
 
-            return Task.CompletedTask;
+            var emailContent = FormatSecurityAlert(subject, message, ipAddress);
+            return await SendEmailAsync(subject, emailContent);
         }
 
-        public override Task OnConnectionDownAsync(Circuit circuit, CancellationToken cancellationToken)
+        public async Task<bool> SendSystemNotificationAsync(string subject, string message)
         {
-            var ip = _ipTracker.GetClientIp(circuit.Id);
-
-            if (ip != null)
+            if (!CheckCooldown("system_notification"))
             {
-                _ipTracker.Remove(circuit.Id);
-                var count = _counter.Decrement();
+                _logger.LogWarning("System notification email skipped due to cooldown");
+                return false;
+            }
 
-                // 连接断开时也采用相同的策略，避免重复记录
-                lock (_logLock)
+            var emailContent = FormatSystemNotification(subject, message);
+            return await SendEmailAsync(subject, emailContent);
+        }
+
+        public async Task<bool> TestEmailServiceAsync()
+        {
+            var subject = "VacantRoomWeb 邮件服务测试";
+            var message = FormatTestEmail();
+            return await SendEmailAsync(subject, message);
+        }
+
+        public void SendSecurityAlert(string subject, string message)
+        {
+            _ = Task.Run(async () => await SendSecurityAlertAsync(subject, message));
+        }
+
+        public void SendSystemNotification(string subject, string message)
+        {
+            _ = Task.Run(async () => await SendSystemNotificationAsync(subject, message));
+        }
+
+        private async Task<bool> SendEmailAsync(string subject, string content)
+        {
+            try
+            {
+                var apiUrl = _configuration["Email:NotifyHubAPI:BaseUrl"];
+                var apiKey = _configuration["Email:NotifyHubAPI:ApiKey"];
+                var recipient = _configuration["Email:DefaultRecipient"];
+
+                if (string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(recipient))
                 {
-                    var now = DateTime.Now;
-                    var shouldLog = false;
+                    _logger.LogError("Email configuration is incomplete");
+                    return false;
+                }
 
-                    if (_lastLoggedConnection.ContainsKey(ip))
+                var payload = new
+                {
+                    to = recipient,
+                    subject = subject,
+                    content = content,
+                    contentType = "html"
+                };
+
+                var jsonContent = JsonSerializer.Serialize(payload);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    httpContent.Headers.Add("X-API-Key", apiKey);
+                }
+
+                var maxRetries = _configuration.GetValue<int>("Email:MaxRetries", 3);
+
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
+                {
+                    try
                     {
-                        if (now.Subtract(_lastLoggedConnection[ip]).TotalSeconds > 10) // 断开连接的间隔更短
+                        var response = await _httpClient.PostAsync($"{apiUrl}/api/send", httpContent);
+
+                        if (response.IsSuccessStatusCode)
                         {
-                            shouldLog = true;
-                            _lastLoggedConnection[ip] = now;
+                            _logger.LogInformation("Email sent successfully: {Subject}", subject);
+                            return true;
+                        }
+
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("Email send failed (attempt {Attempt}/{MaxRetries}): {StatusCode} - {Error}",
+                            attempt, maxRetries, response.StatusCode, errorContent);
+
+                        if (attempt < maxRetries)
+                        {
+                            await Task.Delay(1000 * attempt); // Exponential backoff
                         }
                     }
-                    else
+                    catch (HttpRequestException ex)
                     {
-                        shouldLog = true;
-                        _lastLoggedConnection[ip] = now;
-                    }
+                        _logger.LogWarning("HTTP request failed (attempt {Attempt}/{MaxRetries}): {Error}",
+                            attempt, maxRetries, ex.Message);
 
-                    if (shouldLog)
-                    {
-                        _logger.LogAccess(ip, "BLAZOR_CONNECTION_DOWN", $"Active connections: {count}");
+                        if (attempt < maxRetries)
+                        {
+                            await Task.Delay(1000 * attempt);
+                        }
                     }
                 }
+
+                return false;
             }
-
-            return Task.CompletedTask;
-        }
-
-        private void CleanupOldConnections()
-        {
-            var cutoff = DateTime.Now.AddMinutes(-5);
-            var keysToRemove = _lastLoggedConnection
-                .Where(kvp => kvp.Value < cutoff)
-                .Select(kvp => kvp.Key)
-                .ToList();
-
-            foreach (var key in keysToRemove)
+            catch (Exception ex)
             {
-                _lastLoggedConnection.Remove(key);
+                _logger.LogError(ex, "Failed to send email: {Subject}", subject);
+                return false;
             }
         }
 
-        private string TruncateUserAgent(string userAgent)
+        private bool CheckCooldown(string emailType)
         {
-            if (string.IsNullOrEmpty(userAgent)) return "";
-            return userAgent.Length > 50 ? userAgent.Substring(0, 50) + "..." : userAgent;
+            lock (_cooldownLock)
+            {
+                var cooldownMinutes = _configuration.GetValue<int>("Email:CooldownMinutes", 5);
+                var now = DateTime.Now;
+
+                if (_lastSentTimes.TryGetValue(emailType, out var lastSent))
+                {
+                    if (now.Subtract(lastSent).TotalMinutes < cooldownMinutes)
+                    {
+                        return false;
+                    }
+                }
+
+                _lastSentTimes[emailType] = now;
+                return true;
+            }
+        }
+
+        private string FormatSecurityAlert(string subject, string message, string ipAddress)
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>安全警报</title>
+</head>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #dc3545; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>🚨 安全警报</h1>
+        </div>
+        <div style='padding: 30px;'>
+            <h2 style='color: #dc3545; margin-top: 0;'>{subject}</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>{message}</p>
+            </div>
+            {(string.IsNullOrEmpty(ipAddress) ? "" : $@"
+            <div style='margin: 20px 0;'>
+                <strong>IP地址：</strong> <code style='background-color: #f8f9fa; padding: 2px 6px; border-radius: 3px;'>{ipAddress}</code>
+            </div>")}
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>时间：</strong> {timestamp}<br>
+                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
+                <strong>服务器：</strong> {Environment.MachineName}
+            </div>
+        </div>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
+            此邮件由 VacantRoomWeb 安全监控系统自动发送<br>
+            请勿回复此邮件
+        </div>
+    </div>
+</body>
+</html>";
+        }
+
+        private string FormatSystemNotification(string subject, string message)
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>系统通知</title>
+</head>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #17a2b8; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>📢 系统通知</h1>
+        </div>
+        <div style='padding: 30px;'>
+            <h2 style='color: #17a2b8; margin-top: 0;'>{subject}</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #17a2b8; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>{message}</p>
+            </div>
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>时间：</strong> {timestamp}<br>
+                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
+                <strong>服务器：</strong> {Environment.MachineName}
+            </div>
+        </div>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
+            此邮件由 VacantRoomWeb 系统自动发送<br>
+            请勿回复此邮件
+        </div>
+    </div>
+</body>
+</html>";
+        }
+
+        private string FormatTestEmail()
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>邮件服务测试</title>
+</head>
+<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
+        <div style='background-color: #28a745; color: white; padding: 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 24px;'>✅ 邮件服务测试</h1>
+        </div>
+        <div style='padding: 30px;'>
+            <h2 style='color: #28a745; margin-top: 0;'>测试成功</h2>
+            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;'>
+                <p style='margin: 0; line-height: 1.6;'>VacantRoomWeb 邮件通知服务运行正常。</p>
+                <p style='margin: 10px 0 0 0; line-height: 1.6;'>如果您收到了这封邮件，说明邮件发送功能已正确配置并可以正常工作。</p>
+            </div>
+            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
+                <strong>测试时间：</strong> {timestamp}<br>
+                <strong>系统版本：</strong> VacantRoomWeb v1.0.0<br>
+                <strong>服务器：</strong> {Environment.MachineName}<br>
+                <strong>运行环境：</strong> .NET 8 / Blazor Server
+            </div>
+        </div>
+        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
+            此邮件由 VacantRoomWeb 邮件服务测试功能发送<br>
+            请勿回复此邮件
+        </div>
+    </div>
+</body>
+</html>";
         }
     }
 }
 
 
 ============================================================
-FILE: DomainRoutingMiddleware.cs
-============================================================
-﻿namespace VacantRoomWeb
-{
-    public class DomainRoutingMiddleware
-    {
-        private readonly RequestDelegate _next;
-        private readonly EnhancedLoggingService _logger;
-
-        public DomainRoutingMiddleware(RequestDelegate next, EnhancedLoggingService logger)
-        {
-            _next = next;
-            _logger = logger;
-        }
-
-        public async Task InvokeAsync(HttpContext context)
-        {
-            var host = context.Request.Host.Host.ToLowerInvariant();
-            var path = context.Request.Path.ToString();
-            var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
-
-            // Allow localhost admin access in development
-            if (host.Contains("localhost") && path.StartsWith("/admin"))
-            {
-                // 只记录关键的本地管理访问，避免重复
-                if (IsKeyAdminPath(path))
-                {
-                    _logger.LogAccess(ip, "LOCALHOST_ADMIN_ACCESS", $"Host: {host}, Path: {path}");
-                }
-                await _next(context);
-                return;
-            }
-
-            // Handle admin subdomain
-            if (host.StartsWith("admin."))
-            {
-                // admin 根跳转到登录
-                if (path == "/" || string.IsNullOrEmpty(path))
-                {
-                    _logger.LogAccess(ip, "ADMIN_SUBDOMAIN_REDIRECT", $"Host: {host} -> /admin/login");
-                    context.Response.Redirect("/admin/login");
-                    return;
-                }
-
-                // 不要重写这些系统路径
-                bool isSystemPath =
-                    path.StartsWith("/_framework", StringComparison.OrdinalIgnoreCase) ||
-                    path.StartsWith("/_blazor", StringComparison.OrdinalIgnoreCase) ||
-                    path.StartsWith("/_content", StringComparison.OrdinalIgnoreCase) ||
-                    path.Equals("/favicon.ico", StringComparison.OrdinalIgnoreCase) ||
-                    path.Equals("/robots.txt", StringComparison.OrdinalIgnoreCase);
-
-                // 仅当既不是 /admin 开头、也不是系统路径时，才加前缀
-                if (!path.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) && !isSystemPath)
-                {
-                    var newPath = "/admin" + path;
-                    context.Request.Path = newPath;
-
-                    // 只记录重要的路径重写
-                    if (IsKeyAdminPath(newPath))
-                    {
-                        _logger.LogAccess(ip, "ADMIN_PATH_REWRITE", $"{path} -> {newPath}");
-                    }
-                }
-            }
-
-            await _next(context);
-        }
-
-        private bool IsKeyAdminPath(string path)
-        {
-            // 只记录真正关键的管理路径
-            var keyPaths = new[]
-            {
-                "/admin",
-                "/admin/",
-                "/admin/login",
-                "/admin/dashboard"
-            };
-
-            return keyPaths.Any(keyPath =>
-                path.Equals(keyPath, StringComparison.OrdinalIgnoreCase));
-        }
-    }
-}
-
-
-============================================================
-FILE: EmailNotificationSettings.cs
-============================================================
-﻿// EmailNotificationSettings.cs
-namespace VacantRoomWeb
-{
-    public class EmailNotificationSettings
-    {
-        public bool EnableDDoSAlerts { get; set; }
-        public bool EnableBruteForceAlerts { get; set; }
-        public bool EnableSystemLockdownAlerts { get; set; }
-        public bool EnableIPBanAlerts { get; set; }
-    }
-}
-
-
-============================================================
-FILE: EnhancedLoggingService.cs
+FILE: Services\EnhancedLoggingService.cs
 ============================================================
 ﻿// EnhancedLoggingService.cs - 修复命名冲突版本
 using System.Collections.Concurrent;
 using System.Text;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Services
 {
     // 确保 LogEntry 在 VacantRoomWeb 命名空间中，避免冲突
     public class LogEntry
@@ -3754,986 +4375,6 @@ namespace VacantRoomWeb
 
 
 ============================================================
-FILE: NotificationService.cs
-============================================================
-﻿namespace VacantRoomWeb
-{
-    public class NotificationService
-    {
-        public event Action? LogsUpdated;
-
-        public void NotifyLogsUpdated()
-        {
-            LogsUpdated?.Invoke();
-        }
-    }
-}
-
-
-============================================================
-FILE: PasswordHashGenerator.cs
-============================================================
-﻿namespace VacantRoomWeb
-{
-    /// <summary>
-    /// Utility class to generate password hashes for admin configuration
-    /// Run this once to generate hash and salt, then add to appsettings.json
-    /// </summary>
-    public static class PasswordHashGenerator
-    {
-        /// <summary>
-        /// Generate password hash and salt for a given password
-        /// Usage: var result = PasswordHashGenerator.GenerateHash("your_admin_password");
-        /// </summary>
-        public static (string hash, string salt) GenerateHash(string password)
-        {
-            return AdminAuthService.CreatePasswordHash(password);
-        }
-
-        /// <summary>
-        /// Console application to generate admin password hash
-        /// Uncomment and run this method to generate your admin credentials
-        /// </summary>
-        /*
-        public static void Main(string[] args)
-        {
-            Console.WriteLine("Admin Password Hash Generator");
-            Console.WriteLine("============================");
-            
-            Console.Write("Enter admin password: ");
-            var password = Console.ReadLine();
-            
-            if (string.IsNullOrEmpty(password))
-            {
-                Console.WriteLine("Password cannot be empty!");
-                return;
-            }
-            
-            var (hash, salt) = GenerateHash(password);
-            
-            Console.WriteLine("\nGenerated credentials:");
-            Console.WriteLine($"Password Hash: {hash}");
-            Console.WriteLine($"Salt: {salt}");
-            
-            Console.WriteLine("\nAdd these to your appsettings.json:");
-            Console.WriteLine("\"AdminConfig\": {");
-            Console.WriteLine("  \"Username\": \"admin\",");
-            Console.WriteLine($"  \"PasswordHash\": \"{hash}\",");
-            Console.WriteLine($"  \"Salt\": \"{salt}\",");
-            Console.WriteLine("  \"SecretKey\": \"your_secret_key_for_auth_tokens\"");
-            Console.WriteLine("}");
-            
-            Console.WriteLine("\nPress any key to exit...");
-            Console.ReadKey();
-        }
-        */
-    }
-}
-
-
-============================================================
-FILE: Program.cs
-============================================================
-using Microsoft.AspNetCore.Components.Server.Circuits;
-using VacantRoomWeb;
-using VacantRoomWeb.Components;
-using VacantRoomWeb.Services;
-
-var builder = WebApplication.CreateBuilder(args);
-
-// Add Blazor services
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-
-builder.Services.AddSignalR(options =>
-{
-    options.MaximumReceiveMessageSize = null;
-    options.EnableDetailedErrors = true;
-});
-
-// Register configuration service first (other services depend on it)
-builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
-
-// Register HttpClient for EmailService
-builder.Services.AddHttpClient<IEmailService, EmailService>();
-
-// Register existing services
-builder.Services.AddSingleton<ConnectionCounterService>();
-builder.Services.AddSingleton<ClientConnectionTracker>();
-builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
-
-// Register new security and logging services
-builder.Services.AddSingleton<EnhancedLoggingService>();
-builder.Services.AddSingleton<IStartupLoggingService, StartupLoggingService>();
-builder.Services.AddSingleton<ApplicationStartupService>(provider =>
-    new ApplicationStartupService(provider.GetRequiredService<IStartupLoggingService>()));
-
-// Register security and other services
-builder.Services.AddSingleton<SecurityService>();
-builder.Services.AddSingleton<AdminAuthService>();
-
-// Register notification service for component communication
-builder.Services.AddSingleton<NotificationService>();
-
-// Register updated services with new dependencies
-builder.Services.AddSingleton<VacantRoomService>();
-builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>();
-
-var app = builder.Build();
-
-// 记录应用程序启动
-var startupService = app.Services.GetRequiredService<IStartupLoggingService>();
-startupService.RecordStart();
-
-// Configure the HTTP request pipeline
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    app.UseHsts();
-}
-
-app.UseHttpsRedirection();
-app.UseStaticFiles();
-
-// Add domain routing middleware FIRST
-app.UseMiddleware<DomainRoutingMiddleware>();
-
-// Add security middleware AFTER domain routing
-app.UseMiddleware<SecurityMiddleware>();
-
-app.UseAntiforgery();
-
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
-
-app.Run();
-
-
-============================================================
-FILE: Properties\launchSettings.json
-============================================================
-{
-  "$schema": "http://json.schemastore.org/launchsettings.json",
-  "iisSettings": {
-    "windowsAuthentication": false,
-    "anonymousAuthentication": true,
-    "iisExpress": {
-      "applicationUrl": "http://localhost:5000",
-      "sslPort": 5001
-    }
-  },
-  "profiles": {
-    "http": {
-      "commandName": "Project",
-      "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "applicationUrl": "http://localhost:5000",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      }
-    },
-    "https": {
-      "commandName": "Project",
-      "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "applicationUrl": "https://localhost:5001;http://localhost:5000",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      }
-    },
-    "IIS Express": {
-      "commandName": "IISExpress",
-      "launchBrowser": true,
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      }
-    }
-  }
-}
-
-
-============================================================
-FILE: SecurityMiddleware.cs
-============================================================
-﻿namespace VacantRoomWeb
-{
-    public class SecurityMiddleware
-    {
-        private readonly RequestDelegate _next;
-        private readonly SecurityService _securityService;
-        private readonly EnhancedLoggingService _logger;
-
-        public SecurityMiddleware(RequestDelegate next, SecurityService securityService, EnhancedLoggingService logger)
-        {
-            _next = next;
-            _securityService = securityService;
-            _logger = logger;
-        }
-
-        public async Task InvokeAsync(HttpContext context)
-        {
-            var ip = context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "Unknown";
-            var userAgent = context.Request.Headers.UserAgent.ToString();
-            var requestPath = context.Request.Path.ToString();
-
-            // Check if IP is banned
-            if (_securityService.IsIPBanned(ip))
-            {
-                _logger.LogAccess(ip, "ACCESS_DENIED_BANNED", requestPath, userAgent);
-                context.Response.StatusCode = 403;
-                await context.Response.WriteAsync("Access denied");
-                return;
-            }
-
-            // Check admin panel lockdown
-            if (requestPath.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) && _securityService.IsAdminPanelLocked())
-            {
-                _logger.LogAccess(ip, "ACCESS_DENIED_LOCKDOWN", requestPath, userAgent);
-                context.Response.StatusCode = 503;
-                await context.Response.WriteAsync("Admin panel temporarily unavailable");
-                return;
-            }
-
-            // Rate limiting check
-            if (!_securityService.CheckRateLimit(ip, userAgent))
-            {
-                context.Response.StatusCode = 429;
-                await context.Response.WriteAsync("Too many requests");
-                return;
-            }
-
-            // 进一步优化：只记录真正重要的页面访问
-            if (ShouldLogRequest(requestPath))
-            {
-                _logger.LogAccess(ip, "ACCESS", requestPath, userAgent);
-            }
-
-            await _next(context);
-        }
-
-        private bool ShouldLogRequest(string path)
-        {
-            // 不记录的路径
-            var skipPatterns = new[]
-            {
-                "/_framework/",
-                "/_blazor/",
-                "/_content/",
-                "/css/",
-                "/js/",
-                "/lib/",
-                "/bootstrap/",
-                "/favicon.ico",
-                "/robots.txt",
-                ".css",
-                ".js",
-                ".map",
-                ".woff",
-                ".woff2",
-                ".ttf",
-                ".eot",
-                ".svg",
-                ".png",
-                ".jpg",
-                ".jpeg",
-                ".gif",
-                ".ico"
-            };
-
-            foreach (var pattern in skipPatterns)
-            {
-                if (path.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
-            }
-
-            // 只记录主要页面访问，不记录 Blazor 内部路径
-            var importantPaths = new[]
-            {
-                "/",
-                "/admin",
-                "/admin/login",
-                "/admin/dashboard"
-            };
-
-            // 精确匹配重要路径，或者是根路径
-            return importantPaths.Any(important =>
-                path.Equals(important, StringComparison.OrdinalIgnoreCase) ||
-                path.Equals(important + "/", StringComparison.OrdinalIgnoreCase));
-        }
-    }
-}
-
-
-============================================================
-FILE: SecurityService.cs
-============================================================
-﻿// SecurityService.cs - 修复版本
-using System.Collections.Concurrent;
-using VacantRoomWeb.Services; // 添加这行来引用邮件服务
-
-namespace VacantRoomWeb
-{
-    public class SecurityEvent
-    {
-        public DateTime Timestamp { get; set; }
-        public string IP { get; set; } = "";
-        public string EventType { get; set; } = "";
-        public string Details { get; set; } = "";
-    }
-
-    public class SecurityService
-    {
-        private readonly EnhancedLoggingService _logger;
-        private readonly IEmailService _emailService;
-
-        // IP tracking for rate limiting
-        private readonly ConcurrentDictionary<string, List<DateTime>> _ipRequests = new();
-        private readonly ConcurrentDictionary<string, List<DateTime>> _loginAttempts = new();
-        private readonly ConcurrentDictionary<string, DateTime> _bannedIPs = new();
-
-        // System-wide security tracking
-        private readonly List<DateTime> _recentBreachAttempts = new();
-        private DateTime? _adminPanelLockdownUntil = null;
-        private DateTime _lastEmailSent = DateTime.MinValue;
-
-        private readonly object _lockObject = new();
-
-        public SecurityService(EnhancedLoggingService logger, IEmailService emailService)
-        {
-            _logger = logger;
-            _emailService = emailService;
-        }
-
-        public bool IsIPBanned(string ip)
-        {
-            if (_bannedIPs.TryGetValue(ip, out var banTime))
-            {
-                if (DateTime.Now < banTime)
-                {
-                    return true;
-                }
-                else
-                {
-                    _bannedIPs.TryRemove(ip, out _);
-                }
-            }
-            return false;
-        }
-
-        public bool IsAdminPanelLocked()
-        {
-            if (_adminPanelLockdownUntil.HasValue && DateTime.Now < _adminPanelLockdownUntil.Value)
-            {
-                return true;
-            }
-            else
-            {
-                _adminPanelLockdownUntil = null;
-                return false;
-            }
-        }
-
-        public bool CheckRateLimit(string ip, string userAgent = "")
-        {
-            lock (_lockObject)
-            {
-                var now = DateTime.Now;
-                var oneMinuteAgo = now.AddMinutes(-1);
-
-                // Clean old requests
-                _ipRequests.AddOrUpdate(ip, new List<DateTime> { now }, (key, list) =>
-                {
-                    list.RemoveAll(time => time < oneMinuteAgo);
-                    list.Add(now);
-                    return list;
-                });
-
-                var requestCount = _ipRequests[ip].Count;
-
-                // 优化的DDoS检测：更宽松的阈值
-                // 考虑到Blazor应用的特点，提高到120次/分钟
-                if (requestCount > 120)
-                {
-                    BanIP(ip, TimeSpan.FromMinutes(15), "DDoS_DETECTED"); // 减少到15分钟
-                    _logger.LogAccess(ip, "SECURITY_DDOS_DETECTED", $"Requests in 1min: {requestCount}", userAgent);
-
-                    // 异步发送邮件警报
-                    _ = Task.Run(async () =>
-                    {
-                        await TriggerEmailAlertAsync("DDoS Attack Detected",
-                            $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.", ip);
-                    });
-
-                    return false;
-                }
-
-                // 警告阈值：80次/分钟时记录但不封禁
-                if (requestCount > 80)
-                {
-                    _logger.LogAccess(ip, "SECURITY_HIGH_REQUEST_RATE", $"High request rate: {requestCount}/min", userAgent);
-                }
-
-                return true;
-            }
-        }
-
-        public bool CheckLoginAttempt(string ip, bool successful, string userAgent = "")
-        {
-            lock (_lockObject)
-            {
-                var now = DateTime.Now;
-                var fiveMinutesAgo = now.AddMinutes(-5); // 扩展到5分钟窗口
-                var tenMinutesAgo = now.AddMinutes(-10);
-
-                if (successful)
-                {
-                    // Clear failed attempts on successful login
-                    _loginAttempts.TryRemove(ip, out _);
-                    _logger.LogAccess(ip, "ADMIN_LOGIN_SUCCESS", "", userAgent);
-                    return true;
-                }
-
-                // Track failed attempts (使用5分钟窗口而不是1分钟)
-                _loginAttempts.AddOrUpdate(ip, new List<DateTime> { now }, (key, list) =>
-                {
-                    list.RemoveAll(time => time < fiveMinutesAgo);
-                    list.Add(now);
-                    return list;
-                });
-
-                var failedCount = _loginAttempts[ip].Count;
-
-                // 优化的暴力破解检测：5分钟内8次失败才封禁
-                if (failedCount >= 8)
-                {
-                    BanIP(ip, TimeSpan.FromMinutes(30), "BRUTE_FORCE_DETECTED"); // 减少到30分钟
-                    _logger.LogAccess(ip, "SECURITY_BRUTE_FORCE_DETECTED", $"Failed login attempts: {failedCount} in 5min", userAgent);
-
-                    // Track for system-wide lockdown
-                    _recentBreachAttempts.RemoveAll(time => time < tenMinutesAgo);
-                    _recentBreachAttempts.Add(now);
-
-                    // 异步发送邮件警报
-                    _ = Task.Run(async () =>
-                    {
-                        await TriggerEmailAlertAsync("Brute Force Attack Detected",
-                            $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.", ip);
-                    });
-
-                    // 系统锁定：10分钟内5个不同IP的暴力破解
-                    var recentUniqueAttackers = _loginAttempts
-                        .Where(kvp => kvp.Value.Any(time => time > tenMinutesAgo))
-                        .Count();
-
-                    if (recentUniqueAttackers >= 5)
-                    {
-                        _adminPanelLockdownUntil = now.AddMinutes(15); // 减少到15分钟
-                        _logger.LogAccess(ip, "SECURITY_ADMIN_LOCKDOWN", $"Admin panel locked for 15 minutes due to {recentUniqueAttackers} attackers", userAgent);
-
-                        // 异步发送系统锁定警报
-                        _ = Task.Run(async () =>
-                        {
-                            await TriggerEmailAlertAsync("CRITICAL: Admin Panel Locked",
-                                $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}", ip);
-                        });
-                    }
-
-                    return false;
-                }
-
-                // 警告阈值：5分钟内5次失败时记录警告
-                if (failedCount >= 5)
-                {
-                    _logger.LogAccess(ip, "SECURITY_LOGIN_WARNING", $"Multiple failed attempts: {failedCount}/8 in 5min", userAgent);
-                }
-
-                _logger.LogAccess(ip, "ADMIN_LOGIN_FAILED", $"Attempt {failedCount}/8 in 5min", userAgent);
-                return true;
-            }
-        }
-
-        private void BanIP(string ip, TimeSpan duration, string reason)
-        {
-            var banUntil = DateTime.Now.Add(duration);
-            _bannedIPs.AddOrUpdate(ip, banUntil, (key, oldTime) => banUntil);
-
-            _logger.LogAccess(ip, "SECURITY_IP_BANNED", $"Reason: {reason}, Duration: {duration.TotalMinutes} minutes");
-        }
-
-        // 更新为异步邮件警报方法
-        private async Task TriggerEmailAlertAsync(string subject, string message, string ipAddress = null)
-        {
-            var now = DateTime.Now;
-
-            // Rate limit emails: max 1 every 15 minutes
-            if (now.Subtract(_lastEmailSent).TotalMinutes >= 15)
-            {
-                _lastEmailSent = now;
-
-                try
-                {
-                    await _emailService.SendSecurityAlertAsync(subject, message, ipAddress);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogAccess("SYSTEM", "EMAIL_ALERT_FAILED", $"Failed to send email: {ex.Message}");
-                }
-            }
-        }
-
-        // 保持原有同步方法以保证兼容性
-        private void TriggerEmailAlert(string subject, string message)
-        {
-            var now = DateTime.Now;
-
-            // Rate limit emails: max 1 every 15 minutes (更频繁的通知)
-            if (now.Subtract(_lastEmailSent).TotalMinutes >= 15)
-            {
-                _lastEmailSent = now;
-                _emailService.SendSecurityAlert(subject, message);
-            }
-        }
-
-        public List<SecurityEvent> GetRecentSecurityEvents(int count = 50)
-        {
-            var events = new List<SecurityEvent>();
-            var recentLogs = _logger.GetRecentLogs(count * 2);
-
-            foreach (var log in recentLogs.Where(l => l.Action.StartsWith("SECURITY_") || l.Action.Contains("LOGIN")))
-            {
-                events.Add(new SecurityEvent
-                {
-                    Timestamp = log.Timestamp,
-                    IP = log.IP,
-                    EventType = log.Action,
-                    Details = log.Details
-                });
-            }
-
-            return events.OrderByDescending(e => e.Timestamp).Take(count).ToList();
-        }
-
-        public Dictionary<string, object> GetSecurityStats()
-        {
-            lock (_lockObject)
-            {
-                var now = DateTime.Now;
-                var oneDayAgo = now.AddDays(-1);
-
-                return new Dictionary<string, object>
-                {
-                    ["TotalBannedIPs"] = _bannedIPs.Count(kvp => kvp.Value > now),
-                    ["AdminPanelLocked"] = IsAdminPanelLocked(),
-                    ["LockdownUntil"] = _adminPanelLockdownUntil?.ToString("yyyy-MM-dd HH:mm:ss") ?? "未锁定",
-                    ["RecentBreachAttempts"] = _recentBreachAttempts.Count(t => t > oneDayAgo),
-                    ["ActiveIPTracking"] = _ipRequests.Count
-                };
-            }
-        }
-
-        // 新增：手动解封IP的方法
-        public bool UnbanIP(string ip)
-        {
-            return _bannedIPs.TryRemove(ip, out _);
-        }
-
-        // 新增：获取当前被封禁的IP列表
-        public List<(string IP, DateTime BanUntil, TimeSpan Remaining)> GetBannedIPs()
-        {
-            var now = DateTime.Now;
-            return _bannedIPs
-                .Where(kvp => kvp.Value > now)
-                .Select(kvp => (kvp.Key, kvp.Value, kvp.Value - now))
-                .OrderBy(item => item.Item2)
-                .ToList();
-        }
-
-        // 新增：清除过期的封禁记录
-        public void CleanupExpiredBans()
-        {
-            var now = DateTime.Now;
-            var expiredIPs = _bannedIPs
-                .Where(kvp => kvp.Value <= now)
-                .Select(kvp => kvp.Key)
-                .ToList();
-
-            foreach (var ip in expiredIPs)
-            {
-                _bannedIPs.TryRemove(ip, out _);
-            }
-        }
-    }
-}
-
-
-============================================================
-FILE: Services\ConfigurationService.cs
-============================================================
-﻿// Services/ConfigurationService.cs
-namespace VacantRoomWeb.Services
-{
-    public class AdminConfig
-    {
-        public string Username { get; set; } = "";
-        public string PasswordHash { get; set; } = "";
-        public string Salt { get; set; } = "";
-        public string SecretKey { get; set; } = "";
-    }
-
-    public interface IConfigurationService
-    {
-        AdminConfig? GetAdminConfig();
-        string GetEmailApiUrl();
-        string GetEmailApiKey();
-        string GetDefaultRecipient();
-        int GetEmailCooldownMinutes();
-    }
-
-    public class ConfigurationService : IConfigurationService
-    {
-        private readonly IConfiguration _configuration;
-        private readonly ILogger<ConfigurationService> _logger;
-
-        public ConfigurationService(IConfiguration configuration, ILogger<ConfigurationService> logger = null)
-        {
-            _configuration = configuration;
-            _logger = logger;
-        }
-
-        public AdminConfig? GetAdminConfig()
-        {
-            try
-            {
-                var config = new AdminConfig();
-                _configuration.GetSection("AdminConfig").Bind(config);
-
-                if (string.IsNullOrEmpty(config.Username) ||
-                    string.IsNullOrEmpty(config.PasswordHash) ||
-                    string.IsNullOrEmpty(config.Salt))
-                {
-                    _logger?.LogWarning("Admin configuration is incomplete");
-                    return null;
-                }
-
-                return config;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to load admin configuration");
-                return null;
-            }
-        }
-
-        public string GetEmailApiUrl()
-        {
-            return _configuration["Email:NotifyHubAPI:BaseUrl"] ?? "";
-        }
-
-        public string GetEmailApiKey()
-        {
-            return _configuration["Email:NotifyHubAPI:ApiKey"] ?? "";
-        }
-
-        public string GetDefaultRecipient()
-        {
-            return _configuration["Email:DefaultRecipient"] ?? "";
-        }
-
-        public int GetEmailCooldownMinutes()
-        {
-            return _configuration.GetValue<int>("Email:CooldownMinutes", 5);
-        }
-    }
-}
-
-
-============================================================
-FILE: Services\EmailService.cs
-============================================================
-﻿// Services/EmailService.cs
-using System.Text;
-using System.Text.Json;
-
-namespace VacantRoomWeb.Services
-{
-    public class EmailService : IEmailService
-    {
-        private readonly HttpClient _httpClient;
-        private readonly IConfiguration _configuration;
-        private readonly ILogger<EmailService> _logger;
-        private readonly Dictionary<string, DateTime> _lastSentTimes = new();
-        private readonly object _cooldownLock = new();
-
-        public EmailService(HttpClient httpClient, IConfiguration configuration, ILogger<EmailService> logger)
-        {
-            _httpClient = httpClient;
-            _configuration = configuration;
-            _logger = logger;
-
-            ConfigureHttpClient();
-        }
-
-        private void ConfigureHttpClient()
-        {
-            var timeoutSeconds = _configuration.GetValue<int>("Email:TimeoutSeconds", 30);
-            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-        }
-
-        public async Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null)
-        {
-            if (!CheckCooldown("security_alert"))
-            {
-                _logger.LogWarning("Security alert email skipped due to cooldown");
-                return false;
-            }
-
-            var emailContent = FormatSecurityAlert(subject, message, ipAddress);
-            return await SendEmailAsync(subject, emailContent);
-        }
-
-        public async Task<bool> SendSystemNotificationAsync(string subject, string message)
-        {
-            if (!CheckCooldown("system_notification"))
-            {
-                _logger.LogWarning("System notification email skipped due to cooldown");
-                return false;
-            }
-
-            var emailContent = FormatSystemNotification(subject, message);
-            return await SendEmailAsync(subject, emailContent);
-        }
-
-        public async Task<bool> TestEmailServiceAsync()
-        {
-            var subject = "VacantRoomWeb 邮件服务测试";
-            var message = FormatTestEmail();
-            return await SendEmailAsync(subject, message);
-        }
-
-        public void SendSecurityAlert(string subject, string message)
-        {
-            _ = Task.Run(async () => await SendSecurityAlertAsync(subject, message));
-        }
-
-        public void SendSystemNotification(string subject, string message)
-        {
-            _ = Task.Run(async () => await SendSystemNotificationAsync(subject, message));
-        }
-
-        private async Task<bool> SendEmailAsync(string subject, string content)
-        {
-            try
-            {
-                var apiUrl = _configuration["Email:NotifyHubAPI:BaseUrl"];
-                var apiKey = _configuration["Email:NotifyHubAPI:ApiKey"];
-                var recipient = _configuration["Email:DefaultRecipient"];
-
-                if (string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(recipient))
-                {
-                    _logger.LogError("Email configuration is incomplete");
-                    return false;
-                }
-
-                var payload = new
-                {
-                    to = recipient,
-                    subject = subject,
-                    content = content,
-                    contentType = "html"
-                };
-
-                var jsonContent = JsonSerializer.Serialize(payload);
-                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-                if (!string.IsNullOrEmpty(apiKey))
-                {
-                    httpContent.Headers.Add("X-API-Key", apiKey);
-                }
-
-                var maxRetries = _configuration.GetValue<int>("Email:MaxRetries", 3);
-
-                for (int attempt = 1; attempt <= maxRetries; attempt++)
-                {
-                    try
-                    {
-                        var response = await _httpClient.PostAsync($"{apiUrl}/api/send", httpContent);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            _logger.LogInformation("Email sent successfully: {Subject}", subject);
-                            return true;
-                        }
-
-                        var errorContent = await response.Content.ReadAsStringAsync();
-                        _logger.LogWarning("Email send failed (attempt {Attempt}/{MaxRetries}): {StatusCode} - {Error}",
-                            attempt, maxRetries, response.StatusCode, errorContent);
-
-                        if (attempt < maxRetries)
-                        {
-                            await Task.Delay(1000 * attempt); // Exponential backoff
-                        }
-                    }
-                    catch (HttpRequestException ex)
-                    {
-                        _logger.LogWarning("HTTP request failed (attempt {Attempt}/{MaxRetries}): {Error}",
-                            attempt, maxRetries, ex.Message);
-
-                        if (attempt < maxRetries)
-                        {
-                            await Task.Delay(1000 * attempt);
-                        }
-                    }
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to send email: {Subject}", subject);
-                return false;
-            }
-        }
-
-        private bool CheckCooldown(string emailType)
-        {
-            lock (_cooldownLock)
-            {
-                var cooldownMinutes = _configuration.GetValue<int>("Email:CooldownMinutes", 5);
-                var now = DateTime.Now;
-
-                if (_lastSentTimes.TryGetValue(emailType, out var lastSent))
-                {
-                    if (now.Subtract(lastSent).TotalMinutes < cooldownMinutes)
-                    {
-                        return false;
-                    }
-                }
-
-                _lastSentTimes[emailType] = now;
-                return true;
-            }
-        }
-
-        private string FormatSecurityAlert(string subject, string message, string ipAddress)
-        {
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-            return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <title>安全警报</title>
-</head>
-<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
-    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
-        <div style='background-color: #dc3545; color: white; padding: 20px; text-align: center;'>
-            <h1 style='margin: 0; font-size: 24px;'>🚨 安全警报</h1>
-        </div>
-        <div style='padding: 30px;'>
-            <h2 style='color: #dc3545; margin-top: 0;'>{subject}</h2>
-            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0;'>
-                <p style='margin: 0; line-height: 1.6;'>{message}</p>
-            </div>
-            {(string.IsNullOrEmpty(ipAddress) ? "" : $@"
-            <div style='margin: 20px 0;'>
-                <strong>IP地址：</strong> <code style='background-color: #f8f9fa; padding: 2px 6px; border-radius: 3px;'>{ipAddress}</code>
-            </div>")}
-            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
-                <strong>时间：</strong> {timestamp}<br>
-                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
-                <strong>服务器：</strong> {Environment.MachineName}
-            </div>
-        </div>
-        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
-            此邮件由 VacantRoomWeb 安全监控系统自动发送<br>
-            请勿回复此邮件
-        </div>
-    </div>
-</body>
-</html>";
-        }
-
-        private string FormatSystemNotification(string subject, string message)
-        {
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-            return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <title>系统通知</title>
-</head>
-<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
-    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
-        <div style='background-color: #17a2b8; color: white; padding: 20px; text-align: center;'>
-            <h1 style='margin: 0; font-size: 24px;'>📢 系统通知</h1>
-        </div>
-        <div style='padding: 30px;'>
-            <h2 style='color: #17a2b8; margin-top: 0;'>{subject}</h2>
-            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #17a2b8; margin: 20px 0;'>
-                <p style='margin: 0; line-height: 1.6;'>{message}</p>
-            </div>
-            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
-                <strong>时间：</strong> {timestamp}<br>
-                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
-                <strong>服务器：</strong> {Environment.MachineName}
-            </div>
-        </div>
-        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
-            此邮件由 VacantRoomWeb 系统自动发送<br>
-            请勿回复此邮件
-        </div>
-    </div>
-</body>
-</html>";
-        }
-
-        private string FormatTestEmail()
-        {
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-            return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <title>邮件服务测试</title>
-</head>
-<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
-    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
-        <div style='background-color: #28a745; color: white; padding: 20px; text-align: center;'>
-            <h1 style='margin: 0; font-size: 24px;'>✅ 邮件服务测试</h1>
-        </div>
-        <div style='padding: 30px;'>
-            <h2 style='color: #28a745; margin-top: 0;'>测试成功</h2>
-            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;'>
-                <p style='margin: 0; line-height: 1.6;'>VacantRoomWeb 邮件通知服务运行正常。</p>
-                <p style='margin: 10px 0 0 0; line-height: 1.6;'>如果您收到了这封邮件，说明邮件发送功能已正确配置并可以正常工作。</p>
-            </div>
-            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
-                <strong>测试时间：</strong> {timestamp}<br>
-                <strong>系统版本：</strong> VacantRoomWeb v1.0.0<br>
-                <strong>服务器：</strong> {Environment.MachineName}<br>
-                <strong>运行环境：</strong> .NET 8 / Blazor Server
-            </div>
-        </div>
-        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
-            此邮件由 VacantRoomWeb 邮件服务测试功能发送<br>
-            请勿回复此邮件
-        </div>
-    </div>
-</body>
-</html>";
-        }
-    }
-}
-
-
-============================================================
 FILE: Services\FileBasedLoggingService.cs
 ============================================================
 ﻿// Services/FileBasedLoggingService.cs
@@ -5140,6 +4781,23 @@ namespace VacantRoomWeb.Services
 
 
 ============================================================
+FILE: Services\NotificationService.cs
+============================================================
+﻿namespace VacantRoomWeb.Services
+{
+    public class NotificationService
+    {
+        public event Action? LogsUpdated;
+
+        public void NotifyLogsUpdated()
+        {
+            LogsUpdated?.Invoke();
+        }
+    }
+}
+
+
+============================================================
 FILE: Services\StartupLoggingService.cs
 ============================================================
 ﻿// Services/StartupLoggingService.cs
@@ -5224,6 +4882,8 @@ using Microsoft.AspNetCore.Components.Server.Circuits;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using VacantRoomWeb.Handlers;
+using VacantRoomWeb.Services;
 
 namespace VacantRoomWeb
 {
@@ -5729,7 +5389,7 @@ FILE: appsettings.Development.json
   "Email": {
     "NotifyHubAPI": {
       "BaseUrl": "https://notify.origami7023.cn",
-      "ApiKey": "default-api-key-2024"
+      "ApiKey": "nh-prod-7K9mP3xR8wQ2nV5ag4yQWcL8sA9dE3tY7uI2oP6qW1zX5"
     },
     "DefaultRecipient": "origami7023@gmail.com",
     "CooldownMinutes": 5,

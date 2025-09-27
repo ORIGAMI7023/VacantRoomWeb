@@ -1,4 +1,4 @@
-﻿namespace VacantRoomWeb
+﻿namespace VacantRoomWeb.Handlers
 {
     /// <summary>
     /// 用于在用户连接时记录 IP，在断开时查出对应 IP

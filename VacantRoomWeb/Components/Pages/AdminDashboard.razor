@@ -9,6 +9,7 @@
 @inject ApplicationStartupService StartupService
 @inject IEmailService EmailService
 @inject IConfiguration Configuration
+@using VacantRoomWeb.Models
 @using VacantRoomWeb.Services
 
 <PageTitle>管理后台</PageTitle>
@@ -981,8 +982,8 @@ else
     private bool IsAuthenticated = false;
     private int ActiveTab = 0;
     private int CurrentConnections = 0;
-    private List<VacantRoomWeb.LogEntry> RecentLogs = new(); // 明确指定命名空间
-    private List<VacantRoomWeb.LogEntry> FilteredLogs = new(); // 明确指定命名空间
+    private List<VacantRoomWeb.Models.LogEntry> RecentLogs = new(); // 明确指定命名空间
+    private List<VacantRoomWeb.Models.LogEntry> FilteredLogs = new(); // 明确指定命名空间
     private List<SecurityEvent> SecurityEvents = new();
     private Dictionary<string, object> SecurityStats = new();
     private Dictionary<string, object> LogStats = new();

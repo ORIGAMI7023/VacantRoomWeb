@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components.Server.Circuits;
+using VacantRoomWeb.Services;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Handlers
 {
     public class ConnectionLoggingCircuitHandler : CircuitHandler
     {

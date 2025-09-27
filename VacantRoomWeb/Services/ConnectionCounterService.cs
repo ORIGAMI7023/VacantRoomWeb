@@ -1,4 +1,4 @@
-﻿namespace VacantRoomWeb
+﻿namespace VacantRoomWeb.Services
 {
     /// <summary>
     /// 维护当前在线连接数

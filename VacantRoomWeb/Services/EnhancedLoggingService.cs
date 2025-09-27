@@ -1,20 +1,10 @@
 ﻿// EnhancedLoggingService.cs - 修复命名冲突版本
 using System.Collections.Concurrent;
 using System.Text;
+using VacantRoomWeb.Models;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Services
 {
-    // 确保 LogEntry 在 VacantRoomWeb 命名空间中，避免冲突
-    public class LogEntry
-    {
-        public DateTime Timestamp { get; set; }
-        public string IP { get; set; } = "";
-        public string Action { get; set; } = "";
-        public string Details { get; set; } = "";
-        public string UserAgent { get; set; } = "";
-        public string RequestPath { get; set; } = "";
-    }
-
     public class EnhancedLoggingService : IDisposable
     {
         private readonly string _logDirectory;

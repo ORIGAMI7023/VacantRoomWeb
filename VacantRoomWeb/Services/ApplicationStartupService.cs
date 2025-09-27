@@ -1,6 +1,4 @@
-﻿using VacantRoomWeb.Services;
-
-namespace VacantRoomWeb
+﻿namespace VacantRoomWeb.Services
 {
     /// <summary>
     /// 兼容性适配器 - 保持现有代码的接口不变
