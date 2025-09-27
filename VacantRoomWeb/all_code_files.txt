@@ -1,5 +1,5 @@
 ================================================================================
-打包时间: 2025年09月26日 23:07
+打包时间: 2025年09月27日 21:54
 VACANTROOM WEB PROJECT - ALL CODE FILES
 ================================================================================
 
@@ -5689,6 +5689,9 @@ FILE: VacantRoomWeb.csproj
   <ItemGroup>
     <Content Update="appsettings.Development.json">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Update="web.config">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
 
