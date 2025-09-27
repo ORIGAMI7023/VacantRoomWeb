@@ -48,17 +48,12 @@ namespace VacantRoomWeb.Services
                     if (adminSection.Exists())
                     {
                         adminSection.Bind(config);
-                        _logger?.LogInformation("Admin config loaded from appsettings.json");
                     }
                     else
                     {
-                        _logger?.LogWarning("AdminConfig section not found and no environment variables");
+                        _logger?.LogWarning("Admin configuration not found in environment variables or appsettings");
                         return null;
                     }
-                }
-                else
-                {
-                    _logger?.LogInformation("Admin config loaded from environment variables");
                 }
 
                 // 验证配置完整性
@@ -66,13 +61,10 @@ namespace VacantRoomWeb.Services
                     string.IsNullOrEmpty(config.PasswordHash) ||
                     string.IsNullOrEmpty(config.Salt))
                 {
-                    _logger?.LogWarning($"Admin configuration is incomplete - Username: '{config.Username}', " +
-                        $"PasswordHash: {!string.IsNullOrEmpty(config.PasswordHash)}, " +
-                        $"Salt: {!string.IsNullOrEmpty(config.Salt)}");
+                    _logger?.LogWarning("Admin configuration is incomplete");
                     return null;
                 }
 
-                _logger?.LogInformation("Admin configuration loaded successfully");
                 return config;
             }
             catch (Exception ex)

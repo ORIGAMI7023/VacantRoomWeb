@@ -45,33 +45,16 @@ namespace VacantRoomWeb
                 return false;
             }
 
-            if (string.IsNullOrEmpty(adminConfig.Username))
+            if (string.IsNullOrEmpty(adminConfig.Username) ||
+                string.IsNullOrEmpty(adminConfig.PasswordHash) ||
+                string.IsNullOrEmpty(adminConfig.Salt))
             {
-                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin username is empty", userAgent);
+                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin configuration is incomplete", userAgent);
                 return false;
             }
 
-            if (string.IsNullOrEmpty(adminConfig.PasswordHash))
-            {
-                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin password hash is empty", userAgent);
-                return false;
-            }
-
-            if (string.IsNullOrEmpty(adminConfig.Salt))
-            {
-                _logger.LogAccess(ip, "ADMIN_CONFIG_ERROR", "Admin salt is empty", userAgent);
-                return false;
-            }
-
-            // 详细的验证调试
-            bool usernameMatch = adminConfig.Username == username;
-            bool passwordMatch = VerifyPassword(password, adminConfig.PasswordHash, adminConfig.Salt);
-            bool isValid = usernameMatch && passwordMatch;
-
-            // 记录详细的验证信息（用于调试，生产环境应移除）
-            _logger.LogAccess(ip, "ADMIN_LOGIN_DEBUG",
-                $"Username: '{username}' vs Config: '{adminConfig.Username}' Match: {usernameMatch}, Password Match: {passwordMatch}",
-                userAgent);
+            bool isValid = adminConfig.Username == username &&
+                          VerifyPassword(password, adminConfig.PasswordHash, adminConfig.Salt);
 
             // Always check with security service to track attempts
             _securityService.CheckLoginAttempt(ip, isValid, userAgent);
