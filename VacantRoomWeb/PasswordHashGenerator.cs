@@ -1,4 +1,6 @@
-﻿namespace VacantRoomWeb
+﻿using VacantRoomWeb.Services;
+
+namespace VacantRoomWeb
 {
     /// <summary>
     /// Utility class to generate password hashes for admin configuration

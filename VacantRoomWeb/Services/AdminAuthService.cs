@@ -2,9 +2,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.JSInterop;
-using VacantRoomWeb.Services;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Services
 {
     public class AdminAuthService
     {

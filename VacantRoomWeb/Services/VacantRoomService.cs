@@ -4,9 +4,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using VacantRoomWeb.Handlers;
-using VacantRoomWeb.Services;
 
-namespace VacantRoomWeb
+namespace VacantRoomWeb.Services
 {
     public class VacantRoomService
     {
