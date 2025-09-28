@@ -1,4 +1,4 @@
-﻿// Services/EmailService.cs
+﻿// Services/EmailService.cs - 更新版本使用ConfigurationService
 using System.Text;
 using System.Text.Json;
 
@@ -7,146 +7,211 @@ namespace VacantRoomWeb.Services
     public class EmailService : IEmailService
     {
         private readonly HttpClient _httpClient;
-        private readonly IConfiguration _configuration;
+        private readonly IConfigurationService _configService;  // 改用ConfigurationService
         private readonly ILogger<EmailService> _logger;
         private readonly Dictionary<string, DateTime> _lastSentTimes = new();
         private readonly object _cooldownLock = new();
+        private readonly EnhancedLoggingService _fileLog;
 
-        public EmailService(HttpClient httpClient, IConfiguration configuration, ILogger<EmailService> logger)
+
+        public EmailService(HttpClient httpClient, IConfigurationService configService, ILogger<EmailService> logger, EnhancedLoggingService fileLog)
         {
             _httpClient = httpClient;
-            _configuration = configuration;
+            _configService = configService;
             _logger = logger;
+            _fileLog = fileLog;
 
             ConfigureHttpClient();
         }
 
         private void ConfigureHttpClient()
         {
-            var timeoutSeconds = _configuration.GetValue<int>("Email:TimeoutSeconds", 30);
-            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+            _httpClient.Timeout = TimeSpan.FromSeconds(30);
         }
 
         public async Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null)
         {
-            if (!CheckCooldown("security_alert"))
-            {
-                _logger.LogWarning("Security alert email skipped due to cooldown");
-                return false;
-            }
-
-            var emailContent = FormatSecurityAlert(subject, message, ipAddress);
-            return await SendEmailAsync(subject, emailContent);
+            return await SendEmailAsync($"[安全告警] {subject}", message).ConfigureAwait(false);
         }
 
         public async Task<bool> SendSystemNotificationAsync(string subject, string message)
         {
-            if (!CheckCooldown("system_notification"))
-            {
-                _logger.LogWarning("System notification email skipped due to cooldown");
-                return false;
-            }
-
-            var emailContent = FormatSystemNotification(subject, message);
-            return await SendEmailAsync(subject, emailContent);
+            return await SendEmailAsync($"[系统通知] {subject}", message).ConfigureAwait(false);
         }
 
         public async Task<bool> TestEmailServiceAsync()
         {
-            var subject = "VacantRoomWeb 邮件服务测试";
-            var message = FormatTestEmail();
-            return await SendEmailAsync(subject, message);
+            try
+            {
+                string recipient = _configService.GetDefaultRecipient();
+                return await SendEmailAsync(
+                    subject: "VacantRoomWeb 基础连通性测试",
+                    body: "这是基础连通性测试邮件",
+                    category: "NOTIFICATION",
+                    isHtml: false,
+                    priority: 1,
+                    to: string.IsNullOrWhiteSpace(recipient) ? null : new[] { recipient }
+                ).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "TestEmailServiceAsync failed");
+                return false;
+            }
+        }
+
+
+        public async Task<bool> SimpleTestEmailServiceAsync()
+        {
+            _logger.LogInformation("=== SimpleTestEmailServiceAsync called ===");
+            try
+            {
+                string recipient = _configService.GetDefaultRecipient();
+                return await SendEmailAsync(
+                    subject: "VacantRoomWeb 调试测试",
+                    body: "这是一封用于调试的测试邮件",
+                    category: "NOTIFICATION",
+                    isHtml: false,
+                    priority: 1,
+                    to: string.IsNullOrWhiteSpace(recipient) ? null : new[] { recipient }
+                ).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SimpleTestEmailServiceAsync failed");
+                return false;
+            }
         }
 
         public void SendSecurityAlert(string subject, string message)
         {
+            _logger.LogInformation("=== SendSecurityAlert (sync) called ===");
             _ = Task.Run(async () => await SendSecurityAlertAsync(subject, message));
         }
 
         public void SendSystemNotification(string subject, string message)
         {
+            _logger.LogInformation("=== SendSystemNotification (sync) called ===");
             _ = Task.Run(async () => await SendSystemNotificationAsync(subject, message));
         }
 
-        private async Task<bool> SendEmailAsync(string subject, string content)
+        private async Task<bool> SendEmailAsync(
+            string subject,
+            string body,
+            string category = "NOTIFICATION",
+            bool isHtml = false,
+            int priority = 1,
+            IEnumerable<string> to = null,
+            IEnumerable<string> cc = null,
+            IEnumerable<string> bcc = null)
         {
+            _logger.LogInformation("=== SendEmailAsync called: subject={Subject}, category={Category}, isHtml={IsHtml}, priority={Priority} ===",
+                subject, category, isHtml, priority);
+
             try
             {
-                var apiUrl = _configuration["Email:NotifyHubAPI:BaseUrl"];
-                var apiKey = _configuration["Email:NotifyHubAPI:ApiKey"];
-                var recipient = _configuration["Email:DefaultRecipient"];
+                string baseUrl = _configService.GetEmailApiUrl();
+                string apiKey = _configService.GetEmailApiKey();
+                string endpoint = _configService.GetEmailEndpointPath();
+                string fallbackTo = _configService.GetDefaultRecipient();
 
-                if (string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(recipient))
+                // 收件人兜底：如果未显式传入 to，则使用默认收件人
+                var toList = (to != null && to.Any()) ? to.ToArray() : (string.IsNullOrWhiteSpace(fallbackTo) ? Array.Empty<string>() : new[] { fallbackTo });
+                var ccList = (cc != null && cc.Any()) ? cc.ToArray() : null;
+                var bccList = (bcc != null && bcc.Any()) ? bcc.ToArray() : null;
+
+                string url = $"{baseUrl?.TrimEnd('/')}{endpoint}";
+
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_CONFIG",
+                    $"BaseUrl={(string.IsNullOrWhiteSpace(baseUrl) ? "<EMPTY>" : baseUrl)}; Endpoint={endpoint}; " +
+                    $"ApiKey={(string.IsNullOrEmpty(apiKey) ? "<EMPTY>" : $"SET({apiKey.Length})")}; " +
+                    $"To=[{string.Join(",", toList)}]; Cc=[{(ccList == null ? "" : string.Join(",", ccList))}]; Bcc=[{(bccList == null ? "" : string.Join(",", bccList))}]",
+                    "EmailService");
+
+                if (string.IsNullOrWhiteSpace(baseUrl) || toList.Length == 0)
                 {
-                    _logger.LogError("Email configuration is incomplete");
+                    _logger.LogError("Email configuration incomplete. BaseUrl='{BaseUrl}', To count={Count}", baseUrl, toList.Length);
+                    _fileLog?.LogAccess("SERVER", "EMAIL_API_FAIL", "CONFIG_INCOMPLETE", "EmailService", endpoint);
                     return false;
                 }
 
+                // 按服务端规范构造 payload
                 var payload = new
                 {
-                    to = recipient,
+                    to = toList,
+                    cc = ccList,
+                    bcc = bccList,
                     subject = subject,
-                    content = content,
-                    contentType = "html"
+                    body = body,
+                    category = category,
+                    isHtml = isHtml,
+                    priority = priority
                 };
 
-                var jsonContent = JsonSerializer.Serialize(payload);
-                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                string json = System.Text.Json.JsonSerializer.Serialize(payload);
+                using var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
 
                 if (!string.IsNullOrEmpty(apiKey))
+                    request.Headers.Add("X-API-Key", apiKey);
+
+                _logger.LogInformation("Sending POST {Url}", url);
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_REQUEST",
+                    $"POST {url} -> subject='{(subject?.Length > 60 ? subject.Substring(0, 60) + "..." : subject)}' | category={category} | isHtml={isHtml} | priority={priority}",
+                    "EmailService", endpoint);
+
+                using var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                string respBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    httpContent.Headers.Add("X-API-Key", apiKey);
+                    _logger.LogWarning("Email API failed: {Status} {Reason}. Body: {Body}",
+                        (int)response.StatusCode, response.ReasonPhrase, respBody);
+
+                    _fileLog?.LogAccess("SERVER", "EMAIL_API_FAIL",
+                        $"{(int)response.StatusCode}:{response.ReasonPhrase} | {(respBody?.Length > 300 ? respBody.Substring(0, 300) + "..." : respBody)}",
+                        "EmailService", endpoint);
+                    return false;
                 }
 
-                var maxRetries = _configuration.GetValue<int>("Email:MaxRetries", 3);
-
-                for (int attempt = 1; attempt <= maxRetries; attempt++)
-                {
-                    try
-                    {
-                        var response = await _httpClient.PostAsync($"{apiUrl}/api/send", httpContent);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            _logger.LogInformation("Email sent successfully: {Subject}", subject);
-                            return true;
-                        }
-
-                        var errorContent = await response.Content.ReadAsStringAsync();
-                        _logger.LogWarning("Email send failed (attempt {Attempt}/{MaxRetries}): {StatusCode} - {Error}",
-                            attempt, maxRetries, response.StatusCode, errorContent);
-
-                        if (attempt < maxRetries)
-                        {
-                            await Task.Delay(1000 * attempt); // Exponential backoff
-                        }
-                    }
-                    catch (HttpRequestException ex)
-                    {
-                        _logger.LogWarning("HTTP request failed (attempt {Attempt}/{MaxRetries}): {Error}",
-                            attempt, maxRetries, ex.Message);
-
-                        if (attempt < maxRetries)
-                        {
-                            await Task.Delay(1000 * attempt);
-                        }
-                    }
-                }
-
+                _logger.LogInformation("Email API success: {Status}", (int)response.StatusCode);
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_SUCCESS",
+                    $"{(int)response.StatusCode} | {(respBody?.Length > 200 ? respBody.Substring(0, 200) + "..." : respBody)}",
+                    "EmailService", endpoint);
+                return true;
+            }
+            catch (TaskCanceledException tex)
+            {
+                _logger.LogError(tex, "Email API request timed out");
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_EXCEPTION", "TIMEOUT", "EmailService", "/api/email/send");
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to send email: {Subject}", subject);
+                _logger.LogError(ex, "Email API request threw exception");
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_EXCEPTION",
+                    ex.Message?.Length > 300 ? ex.Message.Substring(0, 300) + "..." : ex.Message,
+                    "EmailService", "/api/email/send");
                 return false;
             }
+        }
+
+
+
+        // 放在 EmailService.cs 里（同类中）的小工具方法
+        private static string Trunc(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s)) return s ?? "";
+            return s.Length <= max ? s : s.Substring(0, max) + "...";
         }
 
         private bool CheckCooldown(string emailType)
         {
             lock (_cooldownLock)
             {
-                var cooldownMinutes = _configuration.GetValue<int>("Email:CooldownMinutes", 5);
+                var cooldownMinutes = _configService.GetEmailCooldownMinutes();
                 var now = DateTime.Now;
 
                 if (_lastSentTimes.TryGetValue(emailType, out var lastSent))
@@ -165,115 +230,19 @@ namespace VacantRoomWeb.Services
         private string FormatSecurityAlert(string subject, string message, string ipAddress)
         {
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-            return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <title>安全警报</title>
-</head>
-<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
-    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
-        <div style='background-color: #dc3545; color: white; padding: 20px; text-align: center;'>
-            <h1 style='margin: 0; font-size: 24px;'>🚨 安全警报</h1>
-        </div>
-        <div style='padding: 30px;'>
-            <h2 style='color: #dc3545; margin-top: 0;'>{subject}</h2>
-            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0;'>
-                <p style='margin: 0; line-height: 1.6;'>{message}</p>
-            </div>
-            {(string.IsNullOrEmpty(ipAddress) ? "" : $@"
-            <div style='margin: 20px 0;'>
-                <strong>IP地址：</strong> <code style='background-color: #f8f9fa; padding: 2px 6px; border-radius: 3px;'>{ipAddress}</code>
-            </div>")}
-            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
-                <strong>时间：</strong> {timestamp}<br>
-                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
-                <strong>服务器：</strong> {Environment.MachineName}
-            </div>
-        </div>
-        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
-            此邮件由 VacantRoomWeb 安全监控系统自动发送<br>
-            请勿回复此邮件
-        </div>
-    </div>
-</body>
-</html>";
+            return $@"<html><body><h2>{subject}</h2><p>{message}</p><p>IP: {ipAddress}</p><p>Time: {timestamp}</p></body></html>";
         }
 
         private string FormatSystemNotification(string subject, string message)
         {
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-            return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <title>系统通知</title>
-</head>
-<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
-    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
-        <div style='background-color: #17a2b8; color: white; padding: 20px; text-align: center;'>
-            <h1 style='margin: 0; font-size: 24px;'>📢 系统通知</h1>
-        </div>
-        <div style='padding: 30px;'>
-            <h2 style='color: #17a2b8; margin-top: 0;'>{subject}</h2>
-            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #17a2b8; margin: 20px 0;'>
-                <p style='margin: 0; line-height: 1.6;'>{message}</p>
-            </div>
-            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
-                <strong>时间：</strong> {timestamp}<br>
-                <strong>系统：</strong> VacantRoomWeb 教室查询系统<br>
-                <strong>服务器：</strong> {Environment.MachineName}
-            </div>
-        </div>
-        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
-            此邮件由 VacantRoomWeb 系统自动发送<br>
-            请勿回复此邮件
-        </div>
-    </div>
-</body>
-</html>";
+            return $@"<html><body><h2>{subject}</h2><p>{message}</p><p>Time: {timestamp}</p></body></html>";
         }
 
         private string FormatTestEmail()
         {
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-            return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <title>邮件服务测试</title>
-</head>
-<body style='font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;'>
-    <div style='max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);'>
-        <div style='background-color: #28a745; color: white; padding: 20px; text-align: center;'>
-            <h1 style='margin: 0; font-size: 24px;'>✅ 邮件服务测试</h1>
-        </div>
-        <div style='padding: 30px;'>
-            <h2 style='color: #28a745; margin-top: 0;'>测试成功</h2>
-            <div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;'>
-                <p style='margin: 0; line-height: 1.6;'>VacantRoomWeb 邮件通知服务运行正常。</p>
-                <p style='margin: 10px 0 0 0; line-height: 1.6;'>如果您收到了这封邮件，说明邮件发送功能已正确配置并可以正常工作。</p>
-            </div>
-            <div style='margin: 20px 0; font-size: 14px; color: #6c757d;'>
-                <strong>测试时间：</strong> {timestamp}<br>
-                <strong>系统版本：</strong> VacantRoomWeb v1.0.0<br>
-                <strong>服务器：</strong> {Environment.MachineName}<br>
-                <strong>运行环境：</strong> .NET 8 / Blazor Server
-            </div>
-        </div>
-        <div style='background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;'>
-            此邮件由 VacantRoomWeb 邮件服务测试功能发送<br>
-            请勿回复此邮件
-        </div>
-    </div>
-</body>
-</html>";
+            return $@"<html><body><h2>Email Service Test</h2><p>VacantRoomWeb email service is working correctly.</p><p>Test time: {timestamp}</p></body></html>";
         }
     }
 }

@@ -6,6 +6,7 @@ namespace VacantRoomWeb.Services
         Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null);
         Task<bool> SendSystemNotificationAsync(string subject, string message);
         Task<bool> TestEmailServiceAsync();
+        Task<bool> SimpleTestEmailServiceAsync(); // 新增简化测试方法
         void SendSecurityAlert(string subject, string message);
         void SendSystemNotification(string subject, string message);
     }

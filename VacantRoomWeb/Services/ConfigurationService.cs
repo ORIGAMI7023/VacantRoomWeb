@@ -1,6 +1,7 @@
-﻿// Services/ConfigurationService.cs
+﻿// Services/ConfigurationService.cs - 完整修复版本
 namespace VacantRoomWeb.Services
 {
+    // AdminConfig 类定义
     public class AdminConfig
     {
         public string Username { get; set; } = "";
@@ -16,6 +17,8 @@ namespace VacantRoomWeb.Services
         string GetEmailApiKey();
         string GetDefaultRecipient();
         int GetEmailCooldownMinutes();
+        Dictionary<string, string> GetEmailConfigDebugInfo();
+        string GetEmailEndpointPath();
     }
 
     public class ConfigurationService : IConfigurationService
@@ -28,6 +31,89 @@ namespace VacantRoomWeb.Services
             _configuration = configuration;
             _logger = logger;
         }
+
+        public string GetEmailApiUrl()
+        {
+            var envValue = _configuration["VACANTROOM_EMAIL_BASEURL"];
+            var configValue = _configuration["Email:NotifyHubAPI:BaseUrl"];
+
+            _logger?.LogInformation("Email API URL - Env: {EnvValue}, Config: {ConfigValue}",
+                envValue ?? "NULL", configValue ?? "NULL");
+
+            return envValue ?? configValue ?? "";
+        }
+
+        public string GetEmailEndpointPath()
+        {
+            string envValue = _configuration["VACANTROOM_EMAIL_ENDPOINT"];
+            string configValue = _configuration["Email:NotifyHubAPI:EndpointPath"];
+
+            // 默认改为 /api/email/send
+            string final = (envValue ?? configValue ?? "/api/email/send").Trim();
+            if (!final.StartsWith("/")) final = "/" + final;
+
+            _logger?.LogInformation("Email EndpointPath - Env:{Env} Config:{Cfg} Final:{Final}",
+                envValue ?? "NULL", configValue ?? "NULL", final);
+
+            return final;
+        }
+
+        public string GetEmailApiKey()
+        {
+            var envValue = _configuration["VACANTROOM_EMAIL_APIKEY"];
+            var configValue = _configuration["Email:NotifyHubAPI:ApiKey"];
+
+            _logger?.LogInformation("Email API Key - Env: {EnvExists}, Config: {ConfigExists}",
+                !string.IsNullOrEmpty(envValue) ? "SET" : "NULL",
+                !string.IsNullOrEmpty(configValue) ? "SET" : "NULL");
+
+            return envValue ?? configValue ?? "";
+        }
+
+        public string GetDefaultRecipient()
+        {
+            var envValue = _configuration["VACANTROOM_EMAIL_RECIPIENT"];
+            var configValue = _configuration["Email:DefaultRecipient"];
+
+            _logger?.LogInformation("Email Recipient - Env: {EnvValue}, Config: {ConfigValue}",
+                envValue ?? "NULL", configValue ?? "NULL");
+
+            return envValue ?? configValue ?? "";
+        }
+
+
+        public int GetEmailCooldownMinutes()
+        {
+            return _configuration.GetValue<int>("Email:CooldownMinutes", 5);
+        }
+
+        // 获取完整的调试信息
+        public Dictionary<string, string> GetEmailConfigDebugInfo()
+        {
+            var debug = new Dictionary<string, string>();
+
+            // 环境变量检查
+            debug["Env_BaseUrl"] = _configuration["VACANTROOM_EMAIL_BASEURL"] ?? "NULL";
+            debug["Env_ApiKey"] = string.IsNullOrEmpty(_configuration["VACANTROOM_EMAIL_APIKEY"]) ? "NULL" : "SET";
+            debug["Env_Recipient"] = _configuration["VACANTROOM_EMAIL_RECIPIENT"] ?? "NULL";
+
+            // 配置文件检查
+            debug["Config_BaseUrl"] = _configuration["Email:NotifyHubAPI:BaseUrl"] ?? "NULL";
+            debug["Config_ApiKey"] = string.IsNullOrEmpty(_configuration["Email:NotifyHubAPI:ApiKey"]) ? "NULL" : "SET";
+            debug["Config_Recipient"] = _configuration["Email:DefaultRecipient"] ?? "NULL";
+
+            // 最终值
+            debug["Final_BaseUrl"] = GetEmailApiUrl();
+            debug["Final_ApiKey"] = string.IsNullOrEmpty(GetEmailApiKey()) ? "NULL" : "SET";
+            debug["Final_Recipient"] = GetDefaultRecipient();
+
+            // 环境信息
+            debug["Environment"] = _configuration["ASPNETCORE_ENVIRONMENT"] ?? "NULL";
+            debug["MachineName"] = Environment.MachineName;
+
+            return debug;
+        }
+
 
         public AdminConfig? GetAdminConfig()
         {
@@ -74,24 +160,5 @@ namespace VacantRoomWeb.Services
             }
         }
 
-        public string GetEmailApiUrl()
-        {
-            return _configuration["Email:NotifyHubAPI:BaseUrl"] ?? "";
-        }
-
-        public string GetEmailApiKey()
-        {
-            return _configuration["Email:NotifyHubAPI:ApiKey"] ?? "";
-        }
-
-        public string GetDefaultRecipient()
-        {
-            return _configuration["Email:DefaultRecipient"] ?? "";
-        }
-
-        public int GetEmailCooldownMinutes()
-        {
-            return _configuration.GetValue<int>("Email:CooldownMinutes", 5);
-        }
     }
 }

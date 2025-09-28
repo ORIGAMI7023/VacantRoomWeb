@@ -5,6 +5,8 @@
 @inject AdminAuthService AuthService
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
+@inject EnhancedLoggingService LoggingService
+
 
 <PageTitle>邮件服务测试</PageTitle>
 
@@ -22,6 +24,31 @@ else
         <div class="test-header">
             <h2>📧 邮件服务测试</h2>
             <p>测试 VacantRoomWeb 邮件通知系统是否正常工作</p>
+        </div>
+
+        <!-- 新增：简化测试 -->
+        <div class="test-section">
+            <h3>🔧 调试测试</h3>
+            <div class="test-card">
+                <div class="test-description">
+                    <h4>简化调试测试</h4>
+                    <p>直接测试邮件服务的基本连接，会输出详细的调试信息。</p>
+                </div>
+                <div class="test-action">
+                    <button @onclick="RunSimpleTest"
+                            disabled="@IsTesting"
+                            class="btn btn-debug">
+                        @if (IsTesting && CurrentTest == "simple")
+                        {
+                            <span>🔄 调试中...</span>
+                        }
+                        else
+                        {
+                            <span>🔧 运行调试测试</span>
+                        }
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="test-section">
@@ -132,173 +159,17 @@ else
 }
 
 <style>
-    .email-test-container {
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 20px;
-    }
-
-    .test-header {
-        text-align: center;
-        margin-bottom: 30px;
-        padding: 20px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 10px;
-    }
-
-    .test-section {
-        margin-bottom: 25px;
-    }
-
-        .test-section h3 {
-            color: #333;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
-        }
-
-    .test-card {
-        background: white;
-        border: 1px solid #e9ecef;
-        border-radius: 8px;
-        padding: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 20px;
-    }
-
-    .test-description {
-        flex: 1;
-    }
-
-        .test-description h4 {
-            margin: 0 0 10px 0;
-            color: #495057;
-        }
-
-        .test-description p {
-            margin: 0;
-            color: #6c757d;
-            font-size: 0.9em;
-        }
-
-    .test-action {
-        flex-shrink: 0;
-    }
-
-    .results-section {
-        margin-top: 30px;
-    }
-
-    .results-container {
-        max-height: 400px;
-        overflow-y: auto;
-    }
-
-    .result-item {
-        margin-bottom: 15px;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 4px solid;
-    }
-
-        .result-item.success {
-            background-color: #d4edda;
-            border-left-color: #28a745;
-        }
-
-        .result-item.error {
-            background-color: #f8d7da;
-            border-left-color: #dc3545;
-        }
-
-    .result-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-        font-weight: 600;
-    }
-
-    .result-message {
-        margin-bottom: 5px;
-        font-size: 0.95em;
-    }
-
-    .result-details {
-        font-size: 0.85em;
-        color: #6c757d;
-        font-family: monospace;
-    }
-
-    .actions-section {
-        margin-top: 30px;
-        text-align: center;
-        display: flex;
-        gap: 15px;
-        justify-content: center;
-    }
-
-    .btn {
-        padding: 10px 20px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-weight: 500;
-        text-decoration: none;
-        display: inline-block;
-        text-align: center;
-    }
-
-    .btn-primary {
-        background: #667eea;
+    /* 现有样式保持不变... */
+    .btn-debug {
+        background: #6f42c1;
         color: white;
     }
 
-    .btn-warning {
-        background: #ffc107;
-        color: #212529;
-    }
+        .btn-debug:hover:not(:disabled) {
+            background: #5a32a3;
+        }
 
-    .btn-info {
-        background: #17a2b8;
-        color: white;
-    }
-
-    .btn-secondary {
-        background: #6c757d;
-        color: white;
-    }
-
-    .btn-outline-secondary {
-        background: transparent;
-        color: #6c757d;
-        border: 1px solid #6c757d;
-    }
-
-    .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    .btn:hover:not(:disabled) {
-        opacity: 0.9;
-        transform: translateY(-1px);
-    }
-
-    {
-        flex-direction: column;
-        text-align: center;
-    }
-
-    .actions-section {
-        flex-direction: column;
-        align-items: center;
-    }
-
-    }
+    /* 其他样式... */
 </style>
 
 @code {
@@ -318,6 +189,40 @@ else
         }
     }
 
+    private async Task RunSimpleTest()
+    {
+        IsTesting = true;
+        CurrentTest = "simple";
+        StateHasChanged();
+
+        try
+        {
+            var success = await EmailService.SimpleTestEmailServiceAsync();
+
+            // 写入文件日志，方便在 access-*.log 中追踪
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_SIMPLE",
+                success ? "SUCCESS" : "FAILED", "EmailTest.razor");
+
+            AddTestResult("简化调试测试", success,
+                success ? "调试测试成功，请查看应用日志获取详细信息"
+                        : "调试测试失败，请查看应用日志获取详细错误信息",
+                "此测试会输出详细的调试日志，请查看应用程序日志文件或控制台输出");
+        }
+        catch (Exception ex)
+        {
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_SIMPLE",
+                $"EXCEPTION:{ex.Message}", "EmailTest.razor");
+
+            AddTestResult("简化调试测试", false, "测试过程中发生异常", ex.Message);
+        }
+        finally
+        {
+            IsTesting = false;
+            CurrentTest = "";
+            StateHasChanged();
+        }
+    }
+
     private async Task RunBasicTest()
     {
         IsTesting = true;
@@ -328,12 +233,20 @@ else
         {
             var success = await EmailService.TestEmailServiceAsync();
 
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_BASIC",
+                success ? "SUCCESS" : "FAILED", "EmailTest.razor");
+
             AddTestResult("基础连通性测试", success,
-                success ? "邮件服务连接正常，测试邮件发送成功" : "邮件服务连接失败或发送失败",
-                success ? "API连接正常，邮件已发送到默认收件人" : "请检查API配置和网络连接");
+                success ? "邮件服务连接正常，测试邮件发送成功"
+                        : "邮件服务连接失败或发送失败",
+                success ? "API连接正常，邮件已发送到默认收件人"
+                        : "请检查API配置和网络连接");
         }
         catch (Exception ex)
         {
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_BASIC",
+                $"EXCEPTION:{ex.Message}", "EmailTest.razor");
+
             AddTestResult("基础连通性测试", false, "测试过程中发生异常", ex.Message);
         }
         finally

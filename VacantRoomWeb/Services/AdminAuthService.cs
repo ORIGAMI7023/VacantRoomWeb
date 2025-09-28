@@ -1,4 +1,4 @@
-﻿// AdminAuthService.cs - 更新版本
+﻿// Services/AdminAuthService.cs - 修复版本
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.JSInterop;
@@ -202,7 +202,7 @@ namespace VacantRoomWeb.Services
         private string ComputeHmac(string data)
         {
             var adminConfig = _configService.GetAdminConfig();
-            var key = adminConfig.SecretKey ?? "DefaultSecretKey";
+            var key = adminConfig?.SecretKey ?? "DefaultSecretKey";
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
             var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
             return Convert.ToBase64String(hash);
