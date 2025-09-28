@@ -10,7 +10,7 @@ namespace VacantRoomWeb
         {
             Console.WriteLine("Generating hash for password: K9mP#3xR8qW$7nZ5");
 
-            var password = "5ArYJwW9y7E5xRWNSsio2mPnpqY9HHsOT4x";  // 在此输入你的真实密码
+            var password = "null";  // 在此输入你的新密码
             var (hash, salt) = CreatePasswordHash(password);
             var secretKey = GenerateSecretKey();
 
@@ -24,11 +24,13 @@ namespace VacantRoomWeb
 
             // ===== 2. 输出 dotnet user-secrets 命令 =====
             Console.WriteLine("\n=== dotnet user-secrets 命令 ===");
-            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:Username\" \"admin_origami\"");
-            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:PasswordHash\" \"{hash}\"");
-            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:Salt\" \"{salt}\"");
-            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:SecretKey\" \"{secretKey}\"");
+            Console.WriteLine($"dotnet user-secrets set \"VACANTROOM_ADMIN_USERNAME\" \"admin_origami\"");
+            Console.WriteLine($"dotnet user-secrets set \"VACANTROOM_ADMIN_PASSWORDHASH\" \"{hash}\"");
+            Console.WriteLine($"dotnet user-secrets set \"VACANTROOM_ADMIN_SALT\" \"{salt}\"");
+            Console.WriteLine($"dotnet user-secrets set \"VACANTROOM_ADMIN_SECRETKEY\" \"{secretKey}\"");
+            Console.WriteLine($"dotnet user-secrets set \"PASSWORD\" \"{password}\"");
             Console.WriteLine("==================================");
+
         }
 
         public static (string hash, string salt) CreatePasswordHash(string password)
