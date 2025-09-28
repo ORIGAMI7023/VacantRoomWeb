@@ -1,5 +1,5 @@
 ================================================================================
-打包时间: 2025年09月28日 09:20
+打包时间: 2025年09月28日 14:59
 VACANTROOM WEB PROJECT - ALL CODE FILES
 ================================================================================
 
@@ -2689,7 +2689,6 @@ FILE: Properties\launchSettings.json
       "applicationUrl": "https://localhost:5001;http://localhost:5000",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "VACANTROOM_EMAIL_APIKEY": "nh-prod-7K9mP3xR8wQ2nV5ag4yQWcL8sA9dE3tY7uI2oP6qW1zX5"
       }
     },
     "IIS Express": {
@@ -5198,13 +5197,14 @@ namespace VacantRoomWeb.Services
 ============================================================
 FILE: VacantRoomWeb.csproj
 ============================================================
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
 	  <AspNetCoreHostingModel>OutOfProcess</AspNetCoreHostingModel>
 	  <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>f95f1e35-3762-4afe-a399-92a85704da9f</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -5245,14 +5245,6 @@ FILE: appsettings.Development.json
       "Default": "Information",
       "Microsoft.AspNetCore": "Warning"
     }
-  },
-
-  // 开发环境的敏感配置 - 仅用于本地调试
-  "AdminConfig": {
-    "Username": "admin_origami",
-    "PasswordHash": "JZbYNmQ8Yi6IRfEht363YGJgjY5eaB7UsfyggX953KQ=",
-    "Salt": "2BfcmATnJ9qH8oMxrOXqn7JFwQ+mbf5QdGwv76nFmjI=",
-    "SecretKey": "mflfYqSSkeacMKzgcH4faGv6FcpYEme9ssPwUEVplacVPYTgYwvomwGkftir+lqdvPolUbsilnmX97vcXeyqCA=="
   },
 
   "Email": {
@@ -5322,13 +5314,13 @@ FILE: web.config
 				<environmentVariables>
 					<!-- 管理员配置 -->
 					<environmentVariable name="VACANTROOM_ADMIN_USERNAME" value="admin_origami" />
-					<environmentVariable name="VACANTROOM_ADMIN_PASSWORDHASH" value="JZbYNmQ8Yi6IRfEht363YGJgjY5eaB7UsfyggX953KQ=" />
-					<environmentVariable name="VACANTROOM_ADMIN_SALT" value="2BfcmATnJ9qH8oMxrOXqn7JFwQ+mbf5QdGwv76nFmjI=" />
-					<environmentVariable name="VACANTROOM_ADMIN_SECRETKEY" value="mflfYqSSkeacMKzgcH4faGv6FcpYEme9ssPwUEVplacVPYTgYwvomwGkftir+lqdvPolUbsilnmX97vcXeyqCA==" />
+					<environmentVariable name="VACANTROOM_ADMIN_PASSWORDHASH" value="xJ9EV+kAvxOVvFXHpLhOHXMeUJzVmNRFLOgwnOwX0bQ=" />
+					<environmentVariable name="VACANTROOM_ADMIN_SALT" value="6W4Y2nNWPxvshShL7/Qg6wE+O3ZPYamoIKxLWC3v8fk=" />
+					<environmentVariable name="VACANTROOM_ADMIN_SECRETKEY" value="X+l95tjhejo5ArYJwW9y7E5xRWNSsio2mPnpqY9HHsOT4xfNxQMyjFCH0Z/DMcY7bIlhhNjUh8w/P958G3XivA==" />
 
 					<!-- 邮件服务配置 -->
 					<environmentVariable name="VACANTROOM_EMAIL_BASEURL" value="https://notify.origami7023.cn" />
-					<environmentVariable name="VACANTROOM_EMAIL_APIKEY" value="nh-prod-7K9mP3xR8wQ2nV5ag4yQWcL8sA9dE3tY7uI2oP6qW1zX5" />
+					<environmentVariable name="VACANTROOM_EMAIL_APIKEY" value="nh-prod-2HQwig0w5Poui5G9I60wPFW1vPBiAZQl6WVTvn6HUAE=" />
 					<environmentVariable name="VACANTROOM_EMAIL_RECIPIENT" value="origami7023@gmail.com" />
 
 					<!-- 环境标识 -->
