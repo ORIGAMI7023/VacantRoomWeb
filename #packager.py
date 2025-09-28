@@ -272,7 +272,7 @@ def combine_code_files():
     base_dir = r"D:\Programing\C#\VacantRoomWeb\VacantRoomWeb"
 
     # Output text file
-    output_file = os.path.join(r"D:\Programing\C#\VacantRoomWeb", "#all_code_files.txt")
+    output_file = os.path.join(r"D:\Programing\C#\VacantRoomWeb", "#VacantRoomWeb_Code.txt")
 
     file_patterns = [
         "*.cs", "*.css", "*.razor", "*.csproj", "*.json", "*.config", "*.xml",
@@ -285,7 +285,7 @@ def combine_code_files():
     exclude_patterns = [
         "bin/**","obj/**",".vs/**","*.user","*.cache","*.tmp","*.log",
         "bootstrap.min.css","bootstrap.min.css.map",
-        "node_modules/**","packages/**",".git/**","Logs/**","all_code_files.txt"
+        "node_modules/**","packages/**",".git/**","Logs/**","VacantRoomWeb_Code.txt"
     ]
 
     # 检查目录是否存在
