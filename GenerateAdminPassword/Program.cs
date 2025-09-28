@@ -10,18 +10,25 @@ namespace VacantRoomWeb
         {
             Console.WriteLine("Generating hash for password: K9mP#3xR8qW$7nZ5");
 
-            var password = "******"  //在此输入密码
+            var password = "5ArYJwW9y7E5xRWNSsio2mPnpqY9HHsOT4x";  // 在此输入你的真实密码
             var (hash, salt) = CreatePasswordHash(password);
             var secretKey = GenerateSecretKey();
 
-            Console.WriteLine("\n=== COPY THIS TO appsettings.json ===");
-            Console.WriteLine("\"AdminConfig\": {");
-            Console.WriteLine("  \"Username\": \"admin_origami\",");
-            Console.WriteLine($"  \"PasswordHash\": \"{hash}\",");
-            Console.WriteLine($"  \"Salt\": \"{salt}\",");
-            Console.WriteLine($"  \"SecretKey\": \"{secretKey}\"");
-            Console.WriteLine("}");
-            Console.WriteLine("=====================================");
+            // ===== 1. 输出 IIS web.config 环境变量格式 =====
+            Console.WriteLine("\n=== IIS web.config 环境变量格式 ===");
+            Console.WriteLine($"\t<environmentVariable name=\"VACANTROOM_ADMIN_USERNAME\" value=\"admin_origami\" />");
+            Console.WriteLine($"\t<environmentVariable name=\"VACANTROOM_ADMIN_PASSWORDHASH\" value=\"{hash}\" />");
+            Console.WriteLine($"\t<environmentVariable name=\"VACANTROOM_ADMIN_SALT\" value=\"{salt}\" />");
+            Console.WriteLine($"\t<environmentVariable name=\"VACANTROOM_ADMIN_SECRETKEY\" value=\"{secretKey}\" />");
+            Console.WriteLine("==================================");
+
+            // ===== 2. 输出 dotnet user-secrets 命令 =====
+            Console.WriteLine("\n=== dotnet user-secrets 命令 ===");
+            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:Username\" \"admin_origami\"");
+            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:PasswordHash\" \"{hash}\"");
+            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:Salt\" \"{salt}\"");
+            Console.WriteLine($"dotnet user-secrets set \"AdminConfig:SecretKey\" \"{secretKey}\"");
+            Console.WriteLine("==================================");
         }
 
         public static (string hash, string salt) CreatePasswordHash(string password)
