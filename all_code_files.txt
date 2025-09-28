@@ -1,5 +1,5 @@
 ================================================================================
-打包时间: 2025年09月28日 08:17
+打包时间: 2025年09月28日 09:20
 VACANTROOM WEB PROJECT - ALL CODE FILES
 ================================================================================
 
@@ -1782,6 +1782,8 @@ FILE: Components\Pages\EmailTest.razor
 @inject AdminAuthService AuthService
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
+@inject EnhancedLoggingService LoggingService
+
 
 <PageTitle>邮件服务测试</PageTitle>
 
@@ -1964,7 +1966,6 @@ else
         }
     }
 
-    // 新增：简化测试方法
     private async Task RunSimpleTest()
     {
         IsTesting = true;
@@ -1975,12 +1976,20 @@ else
         {
             var success = await EmailService.SimpleTestEmailServiceAsync();
 
+            // 写入文件日志，方便在 access-*.log 中追踪
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_SIMPLE",
+                success ? "SUCCESS" : "FAILED", "EmailTest.razor");
+
             AddTestResult("简化调试测试", success,
-                success ? "调试测试成功，请查看应用日志获取详细信息" : "调试测试失败，请查看应用日志获取详细错误信息",
+                success ? "调试测试成功，请查看应用日志获取详细信息"
+                        : "调试测试失败，请查看应用日志获取详细错误信息",
                 "此测试会输出详细的调试日志，请查看应用程序日志文件或控制台输出");
         }
         catch (Exception ex)
         {
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_SIMPLE",
+                $"EXCEPTION:{ex.Message}", "EmailTest.razor");
+
             AddTestResult("简化调试测试", false, "测试过程中发生异常", ex.Message);
         }
         finally
@@ -2001,12 +2010,20 @@ else
         {
             var success = await EmailService.TestEmailServiceAsync();
 
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_BASIC",
+                success ? "SUCCESS" : "FAILED", "EmailTest.razor");
+
             AddTestResult("基础连通性测试", success,
-                success ? "邮件服务连接正常，测试邮件发送成功" : "邮件服务连接失败或发送失败",
-                success ? "API连接正常，邮件已发送到默认收件人" : "请检查API配置和网络连接");
+                success ? "邮件服务连接正常，测试邮件发送成功"
+                        : "邮件服务连接失败或发送失败",
+                success ? "API连接正常，邮件已发送到默认收件人"
+                        : "请检查API配置和网络连接");
         }
         catch (Exception ex)
         {
+            LoggingService.LogAccess("ADMIN", "EMAIL_TEST_BASIC",
+                $"EXCEPTION:{ex.Message}", "EmailTest.razor");
+
             AddTestResult("基础连通性测试", false, "测试过程中发生异常", ex.Message);
         }
         finally
@@ -2671,7 +2688,8 @@ FILE: Properties\launchSettings.json
       "launchBrowser": true,
       "applicationUrl": "https://localhost:5001;http://localhost:5000",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "VACANTROOM_EMAIL_APIKEY": "nh-prod-7K9mP3xR8wQ2nV5ag4yQWcL8sA9dE3tY7uI2oP6qW1zX5"
       }
     },
     "IIS Express": {
@@ -3018,9 +3036,8 @@ namespace VacantRoomWeb.Services
         string GetEmailApiKey();
         string GetDefaultRecipient();
         int GetEmailCooldownMinutes();
-
-        // 调试方法
         Dictionary<string, string> GetEmailConfigDebugInfo();
+        string GetEmailEndpointPath();
     }
 
     public class ConfigurationService : IConfigurationService
@@ -3036,7 +3053,6 @@ namespace VacantRoomWeb.Services
 
         public string GetEmailApiUrl()
         {
-            // 优先环境变量，然后配置文件
             var envValue = _configuration["VACANTROOM_EMAIL_BASEURL"];
             var configValue = _configuration["Email:NotifyHubAPI:BaseUrl"];
 
@@ -3044,6 +3060,20 @@ namespace VacantRoomWeb.Services
                 envValue ?? "NULL", configValue ?? "NULL");
 
             return envValue ?? configValue ?? "";
+        }
+
+        public string GetEmailEndpointPath()
+        {
+            string envValue = _configuration["VACANTROOM_EMAIL_ENDPOINT"];
+            string configValue = _configuration["Email:NotifyHubAPI:EndpointPath"];
+
+            string final = (envValue ?? configValue ?? "/api/email/send").Trim();
+            if (!final.StartsWith("/")) final = "/" + final;
+
+            _logger?.LogInformation("Email EndpointPath - Env:{Env} Config:{Cfg} Final:{Final}",
+                envValue ?? "NULL", configValue ?? "NULL", final);
+
+            return final;
         }
 
         public string GetEmailApiKey()
@@ -3068,6 +3098,7 @@ namespace VacantRoomWeb.Services
 
             return envValue ?? configValue ?? "";
         }
+
 
         public int GetEmailCooldownMinutes()
         {
@@ -3100,6 +3131,7 @@ namespace VacantRoomWeb.Services
 
             return debug;
         }
+
 
         public AdminConfig? GetAdminConfig()
         {
@@ -3145,6 +3177,7 @@ namespace VacantRoomWeb.Services
                 return null;
             }
         }
+
     }
 }
 
@@ -3197,12 +3230,15 @@ namespace VacantRoomWeb.Services
         private readonly ILogger<EmailService> _logger;
         private readonly Dictionary<string, DateTime> _lastSentTimes = new();
         private readonly object _cooldownLock = new();
+        private readonly EnhancedLoggingService _fileLog;
 
-        public EmailService(HttpClient httpClient, IConfigurationService configService, ILogger<EmailService> logger)
+
+        public EmailService(HttpClient httpClient, IConfigurationService configService, ILogger<EmailService> logger, EnhancedLoggingService fileLog)
         {
             _httpClient = httpClient;
             _configService = configService;
             _logger = logger;
+            _fileLog = fileLog;
 
             ConfigureHttpClient();
         }
@@ -3214,141 +3250,54 @@ namespace VacantRoomWeb.Services
 
         public async Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null)
         {
-            _logger.LogInformation("=== SendSecurityAlertAsync called ===");
-
-            if (!CheckCooldown("security_alert"))
-            {
-                _logger.LogWarning("Security alert email skipped due to cooldown");
-                return false;
-            }
-
-            var emailContent = FormatSecurityAlert(subject, message, ipAddress);
-            return await SendEmailAsync(subject, emailContent);
+            return await SendEmailAsync($"[安全告警] {subject}", message).ConfigureAwait(false);
         }
 
         public async Task<bool> SendSystemNotificationAsync(string subject, string message)
         {
-            _logger.LogInformation("=== SendSystemNotificationAsync called ===");
-
-            if (!CheckCooldown("system_notification"))
-            {
-                _logger.LogWarning("System notification email skipped due to cooldown");
-                return false;
-            }
-
-            var emailContent = FormatSystemNotification(subject, message);
-            return await SendEmailAsync(subject, emailContent);
+            return await SendEmailAsync($"[系统通知] {subject}", message).ConfigureAwait(false);
         }
 
         public async Task<bool> TestEmailServiceAsync()
         {
-            _logger.LogInformation("=== TestEmailServiceAsync called ===");
-
-            var subject = "VacantRoomWeb 邮件服务测试";
-            var message = FormatTestEmail();
-            return await SendEmailAsync(subject, message);
+            try
+            {
+                string recipient = _configService.GetDefaultRecipient();
+                return await SendEmailAsync(
+                    subject: "VacantRoomWeb 基础连通性测试",
+                    body: "这是基础连通性测试邮件",
+                    category: "NOTIFICATION",
+                    isHtml: false,
+                    priority: 1,
+                    to: string.IsNullOrWhiteSpace(recipient) ? null : new[] { recipient }
+                ).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "TestEmailServiceAsync failed");
+                return false;
+            }
         }
+
 
         public async Task<bool> SimpleTestEmailServiceAsync()
         {
             _logger.LogInformation("=== SimpleTestEmailServiceAsync called ===");
-
             try
             {
-                // 从ConfigurationService获取配置
-                var apiUrl = _configService.GetEmailApiUrl();
-                var apiKey = _configService.GetEmailApiKey();
-                var recipient = _configService.GetDefaultRecipient();
-
-                _logger.LogInformation("=== Configuration Check ===");
-                _logger.LogInformation("API URL: '{ApiUrl}'", apiUrl ?? "NULL");
-                _logger.LogInformation("API Key: '{ApiKey}'", string.IsNullOrEmpty(apiKey) ? "NULL/EMPTY" : $"SET ({apiKey.Length} chars)");
-                _logger.LogInformation("Recipient: '{Recipient}'", recipient ?? "NULL");
-
-                // 获取完整的调试信息
-                var debugInfo = _configService.GetEmailConfigDebugInfo();
-                _logger.LogInformation("=== Full Debug Info ===");
-                foreach (var kvp in debugInfo)
-                {
-                    _logger.LogInformation("{Key}: {Value}", kvp.Key, kvp.Value);
-                }
-
-                if (string.IsNullOrEmpty(apiUrl))
-                {
-                    _logger.LogError("API URL is null or empty!");
-                    return false;
-                }
-
-                if (string.IsNullOrEmpty(recipient))
-                {
-                    _logger.LogError("Recipient is null or empty!");
-                    return false;
-                }
-
-                // 创建简单的测试载荷
-                var payload = new
-                {
-                    to = recipient,
-                    subject = "C# Simple Test",
-                    content = "This is a simple test from C# EmailService",
-                    contentType = "text"
-                };
-
-                var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                    WriteIndented = true
-                });
-
-                _logger.LogInformation("=== Request Details ===");
-                _logger.LogInformation("Target URL: {Url}", $"{apiUrl}/api/send");
-                _logger.LogInformation("JSON Payload:\n{Json}", json);
-
-                // 创建新的 HttpClient 实例用于测试
-                using var testClient = new HttpClient();
-                testClient.Timeout = TimeSpan.FromSeconds(30);
-
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                if (!string.IsNullOrEmpty(apiKey))
-                {
-                    content.Headers.Add("X-API-Key", apiKey);
-                    _logger.LogInformation("X-API-Key header added");
-                }
-
-                _logger.LogInformation("=== Sending Request ===");
-                var response = await testClient.PostAsync($"{apiUrl}/api/send", content);
-
-                _logger.LogInformation("=== Response Received ===");
-                _logger.LogInformation("Status Code: {StatusCode}", response.StatusCode);
-                _logger.LogInformation("Status Code (numeric): {StatusCodeNum}", (int)response.StatusCode);
-
-                var responseBody = await response.Content.ReadAsStringAsync();
-                _logger.LogInformation("Response Body:\n{ResponseBody}", responseBody);
-
-                // 检查响应头
-                _logger.LogInformation("=== Response Headers ===");
-                foreach (var header in response.Headers)
-                {
-                    _logger.LogInformation("{HeaderName}: {HeaderValue}", header.Key, string.Join(", ", header.Value));
-                }
-
-                if (response.IsSuccessStatusCode)
-                {
-                    _logger.LogInformation("✅ Simple email test SUCCESSFUL!");
-                    return true;
-                }
-                else
-                {
-                    _logger.LogError("❌ Simple email test FAILED with status: {Status}", response.StatusCode);
-                    return false;
-                }
+                string recipient = _configService.GetDefaultRecipient();
+                return await SendEmailAsync(
+                    subject: "VacantRoomWeb 调试测试",
+                    body: "这是一封用于调试的测试邮件",
+                    category: "NOTIFICATION",
+                    isHtml: false,
+                    priority: 1,
+                    to: string.IsNullOrWhiteSpace(recipient) ? null : new[] { recipient }
+                ).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Exception in SimpleTestEmailServiceAsync: {Message}", ex.Message);
-                _logger.LogError("Exception Type: {Type}", ex.GetType().Name);
-                _logger.LogError("Stack Trace:\n{StackTrace}", ex.StackTrace);
+                _logger.LogError(ex, "SimpleTestEmailServiceAsync failed");
                 return false;
             }
         }
@@ -3365,107 +3314,116 @@ namespace VacantRoomWeb.Services
             _ = Task.Run(async () => await SendSystemNotificationAsync(subject, message));
         }
 
-        private async Task<bool> SendEmailAsync(string subject, string content)
+        private async Task<bool> SendEmailAsync(
+            string subject,
+            string body,
+            string category = "NOTIFICATION",
+            bool isHtml = false,
+            int priority = 1,
+            IEnumerable<string> to = null,
+            IEnumerable<string> cc = null,
+            IEnumerable<string> bcc = null)
         {
-            _logger.LogInformation("=== SendEmailAsync called with subject: {Subject} ===", subject);
+            _logger.LogInformation("=== SendEmailAsync called: subject={Subject}, category={Category}, isHtml={IsHtml}, priority={Priority} ===",
+                subject, category, isHtml, priority);
 
             try
             {
-                var apiUrl = _configService.GetEmailApiUrl();
-                var apiKey = _configService.GetEmailApiKey();
-                var recipient = _configService.GetDefaultRecipient();
+                string baseUrl = _configService.GetEmailApiUrl();
+                string apiKey = _configService.GetEmailApiKey();
+                string endpoint = _configService.GetEmailEndpointPath();
+                string fallbackTo = _configService.GetDefaultRecipient();
 
-                _logger.LogInformation("Email Configuration:");
-                _logger.LogInformation("  API URL: {ApiUrl}", apiUrl);
-                _logger.LogInformation("  API Key: {ApiKey}", string.IsNullOrEmpty(apiKey) ? "NOT SET" : $"SET ({apiKey.Length} chars)");
-                _logger.LogInformation("  Recipient: {Recipient}", recipient);
+                // 收件人兜底：如果未显式传入 to，则使用默认收件人
+                var toList = (to != null && to.Any()) ? to.ToArray() : (string.IsNullOrWhiteSpace(fallbackTo) ? Array.Empty<string>() : new[] { fallbackTo });
+                var ccList = (cc != null && cc.Any()) ? cc.ToArray() : null;
+                var bccList = (bcc != null && bcc.Any()) ? bcc.ToArray() : null;
 
-                if (string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(recipient))
+                string url = $"{baseUrl?.TrimEnd('/')}{endpoint}";
+
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_CONFIG",
+                    $"BaseUrl={(string.IsNullOrWhiteSpace(baseUrl) ? "<EMPTY>" : baseUrl)}; Endpoint={endpoint}; " +
+                    $"ApiKey={(string.IsNullOrEmpty(apiKey) ? "<EMPTY>" : $"SET({apiKey.Length})")}; " +
+                    $"To=[{string.Join(",", toList)}]; Cc=[{(ccList == null ? "" : string.Join(",", ccList))}]; Bcc=[{(bccList == null ? "" : string.Join(",", bccList))}]",
+                    "EmailService");
+
+                if (string.IsNullOrWhiteSpace(baseUrl) || toList.Length == 0)
                 {
-                    _logger.LogError("Email configuration is incomplete - ApiUrl: {ApiUrl}, Recipient: {Recipient}", apiUrl, recipient);
+                    _logger.LogError("Email configuration incomplete. BaseUrl='{BaseUrl}', To count={Count}", baseUrl, toList.Length);
+                    _fileLog?.LogAccess("SERVER", "EMAIL_API_FAIL", "CONFIG_INCOMPLETE", "EmailService", endpoint);
                     return false;
                 }
 
+                // 按服务端规范构造 payload
                 var payload = new
                 {
-                    to = recipient,
+                    to = toList,
+                    cc = ccList,
+                    bcc = bccList,
                     subject = subject,
-                    content = content,
-                    contentType = "html"
+                    body = body,
+                    category = category,
+                    isHtml = isHtml,
+                    priority = priority
                 };
 
-                var jsonContent = JsonSerializer.Serialize(payload);
-                _logger.LogInformation("Email payload: {Payload}", jsonContent);
-
-                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                string json = System.Text.Json.JsonSerializer.Serialize(payload);
+                using var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
 
                 if (!string.IsNullOrEmpty(apiKey))
+                    request.Headers.Add("X-API-Key", apiKey);
+
+                _logger.LogInformation("Sending POST {Url}", url);
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_REQUEST",
+                    $"POST {url} -> subject='{(subject?.Length > 60 ? subject.Substring(0, 60) + "..." : subject)}' | category={category} | isHtml={isHtml} | priority={priority}",
+                    "EmailService", endpoint);
+
+                using var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                string respBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    httpContent.Headers.Add("X-API-Key", apiKey);
-                    _logger.LogInformation("API Key header added");
-                }
-                else
-                {
-                    _logger.LogWarning("No API Key provided");
-                }
+                    _logger.LogWarning("Email API failed: {Status} {Reason}. Body: {Body}",
+                        (int)response.StatusCode, response.ReasonPhrase, respBody);
 
-                var maxRetries = 3;
-
-                for (int attempt = 1; attempt <= maxRetries; attempt++)
-                {
-                    try
-                    {
-                        _logger.LogInformation("Sending email attempt {Attempt}/{MaxRetries} to {ApiUrl}/api/send", attempt, maxRetries, apiUrl);
-
-                        var response = await _httpClient.PostAsync($"{apiUrl}/api/send", httpContent);
-
-                        _logger.LogInformation("Response status: {StatusCode}", response.StatusCode);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            var responseContent = await response.Content.ReadAsStringAsync();
-                            _logger.LogInformation("Email sent successfully: {Subject}. Response: {Response}", subject, responseContent);
-                            return true;
-                        }
-
-                        var errorContent = await response.Content.ReadAsStringAsync();
-                        _logger.LogWarning("Email send failed (attempt {Attempt}/{MaxRetries}): {StatusCode} - {Error}",
-                            attempt, maxRetries, response.StatusCode, errorContent);
-
-                        if (attempt < maxRetries)
-                        {
-                            await Task.Delay(1000 * attempt);
-                        }
-                    }
-                    catch (HttpRequestException ex)
-                    {
-                        _logger.LogWarning("HTTP request failed (attempt {Attempt}/{MaxRetries}): {Error}",
-                            attempt, maxRetries, ex.Message);
-
-                        if (attempt < maxRetries)
-                        {
-                            await Task.Delay(1000 * attempt);
-                        }
-                    }
-                    catch (TaskCanceledException ex)
-                    {
-                        _logger.LogWarning("Request timeout (attempt {Attempt}/{MaxRetries}): {Error}",
-                            attempt, maxRetries, ex.Message);
-
-                        if (attempt < maxRetries)
-                        {
-                            await Task.Delay(1000 * attempt);
-                        }
-                    }
+                    _fileLog?.LogAccess("SERVER", "EMAIL_API_FAIL",
+                        $"{(int)response.StatusCode}:{response.ReasonPhrase} | {(respBody?.Length > 300 ? respBody.Substring(0, 300) + "..." : respBody)}",
+                        "EmailService", endpoint);
+                    return false;
                 }
 
+                _logger.LogInformation("Email API success: {Status}", (int)response.StatusCode);
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_SUCCESS",
+                    $"{(int)response.StatusCode} | {(respBody?.Length > 200 ? respBody.Substring(0, 200) + "..." : respBody)}",
+                    "EmailService", endpoint);
+                return true;
+            }
+            catch (TaskCanceledException tex)
+            {
+                _logger.LogError(tex, "Email API request timed out");
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_EXCEPTION", "TIMEOUT", "EmailService", "/api/email/send");
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to send email: {Subject}", subject);
+                _logger.LogError(ex, "Email API request threw exception");
+                _fileLog?.LogAccess("SERVER", "EMAIL_API_EXCEPTION",
+                    ex.Message?.Length > 300 ? ex.Message.Substring(0, 300) + "..." : ex.Message,
+                    "EmailService", "/api/email/send");
                 return false;
             }
+        }
+
+
+
+        // 放在 EmailService.cs 里（同类中）的小工具方法
+        private static string Trunc(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s)) return s ?? "";
+            return s.Length <= max ? s : s.Substring(0, max) + "...";
         }
 
         private bool CheckCooldown(string emailType)
@@ -5300,7 +5258,6 @@ FILE: appsettings.Development.json
   "Email": {
     "NotifyHubAPI": {
       "BaseUrl": "https://notify.origami7023.cn",
-      "ApiKey": "nh-prod-7K9mP3xR8wQ2nV5ag4yQWcL8sA9dE3tY7uI2oP6qW1zX5"
     },
     "DefaultRecipient": "origami7023@gmail.com",
     "CooldownMinutes": 5,

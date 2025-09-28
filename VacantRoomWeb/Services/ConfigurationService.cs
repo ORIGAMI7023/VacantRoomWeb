@@ -48,7 +48,6 @@ namespace VacantRoomWeb.Services
             string envValue = _configuration["VACANTROOM_EMAIL_ENDPOINT"];
             string configValue = _configuration["Email:NotifyHubAPI:EndpointPath"];
 
-            // 默认改为 /api/email/send
             string final = (envValue ?? configValue ?? "/api/email/send").Trim();
             if (!final.StartsWith("/")) final = "/" + final;
 

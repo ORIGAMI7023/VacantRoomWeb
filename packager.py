@@ -8,7 +8,7 @@ def combine_code_files():
     base_dir = r"D:\Programing\C#\VacantRoomWeb\VacantRoomWeb"
     
     # Output text file
-    output_file = os.path.join(base_dir, "all_code_files.txt")
+    output_file = os.path.join( r"D:\Programing\C#\VacantRoomWeb", "all_code_files.txt")
     
     # 扩展的文件模式 - 包含所有重要的项目文件
     file_patterns = [
