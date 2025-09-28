@@ -290,31 +290,6 @@ else
 
                     <div class="email-actions">
                         <div class="action-group">
-                            <h4>邮件服务测试</h4>
-                            <div class="test-controls">
-                                <button @onclick="TestEmailService"
-                                        disabled="@IsEmailTesting"
-                                        class="btn btn-primary">
-                                    @if (IsEmailTesting)
-                                    {
-                                        <span>⏳ 测试中...</span>
-                                    }
-                                    else
-                                    {
-                                        <span>📧 发送测试邮件</span>
-                                    }
-                                </button>
-                            </div>
-
-                            @if (!string.IsNullOrEmpty(EmailTestResult))
-                            {
-                                <div class="test-result @(EmailTestSuccess ? "success" : "error")">
-                                    @EmailTestResult
-                                </div>
-                            }
-                        </div>
-
-                        <div class="action-group">
                             <h4>邮件配置</h4>
                             <div class="config-display">
                                 <p><strong>API地址：</strong> @EmailConfig["ApiUrl"]</p>
@@ -331,33 +306,34 @@ else
 
                         <div class="action-group">
                             <h4>安全警报设置</h4>
-                            <div class="alert-settings">
+                            <div class="alert-settings disabled">
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" @bind="EmailSettings.EnableDDoSAlerts" />
+                                        <input type="checkbox" disabled @bind="EmailSettings.EnableDDoSAlerts" />
                                         DDoS攻击警报
                                     </label>
                                 </div>
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" @bind="EmailSettings.EnableBruteForceAlerts" />
+                                        <input type="checkbox" disabled @bind="EmailSettings.EnableBruteForceAlerts" />
                                         暴力破解警报
                                     </label>
                                 </div>
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" @bind="EmailSettings.EnableSystemLockdownAlerts" />
+                                        <input type="checkbox" disabled @bind="EmailSettings.EnableSystemLockdownAlerts" />
                                         系统锁定警报
                                     </label>
                                 </div>
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" @bind="EmailSettings.EnableIPBanAlerts" />
+                                        <input type="checkbox" disabled @bind="EmailSettings.EnableIPBanAlerts" />
                                         IP封禁警报
                                     </label>
                                 </div>
 
-                                <button @onclick="SaveEmailSettings" class="btn btn-success btn-sm">💾 保存设置</button>
+                                <button @onclick="SaveEmailSettings" disabled class="btn btn-success btn-sm disabled">💾 保存设置 (开发中)</button>
+                                <p class="feature-notice">此功能正在开发中，暂时不可用</p>
                             </div>
                         </div>
 
@@ -378,6 +354,35 @@ else
                                     📤 发送通知邮件
                                 </button>
                             </div>
+                        </div>
+
+                        <div class="action-group">
+                            <h4>快速操作</h4>
+                            <div class="quick-actions">
+                                <button @onclick="NavigateToEmailTest"
+                                        class="btn btn-outline-primary">
+                                    🧪 进入邮件测试页面
+                                </button>
+                                <button @onclick="TestEmailService"
+                                        disabled="@IsEmailTesting"
+                                        class="btn btn-outline-secondary">
+                                    @if (IsEmailTesting)
+                                    {
+                                        <span>⏳ 测试中...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>📧 快速连通性测试</span>
+                                    }
+                                </button>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(EmailTestResult))
+                            {
+                                <div class="test-result @(EmailTestSuccess ? "success" : "error")">
+                                    @EmailTestResult
+                                </div>
+                            }
                         </div>
                     </div>
                 </div>
@@ -1142,6 +1147,11 @@ else
         await Task.CompletedTask;
     }
 
+    private void NavigateToEmailTest()
+    {
+        Navigation.NavigateTo("/admin/email-test");
+    }
+
     private async Task TestEmailService()
     {
         IsEmailTesting = true;
@@ -1272,3 +1282,5 @@ else
         _refreshTimer?.Dispose();
     }
 }
+
+
