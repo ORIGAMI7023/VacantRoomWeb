@@ -7,7 +7,6 @@
 @inject IJSRuntime JSRuntime
 @inject EnhancedLoggingService LoggingService
 
-
 <PageTitle>邮件服务测试</PageTitle>
 
 @if (!IsAuthenticated)
@@ -20,27 +19,31 @@
 }
 else
 {
-    <div class="email-test-container">
-        <div class="test-header">
+    <div class="email-test-page">
+        <!-- 页面标题 -->
+        <div class="page-header">
             <h2>📧 邮件服务测试</h2>
             <p>测试 VacantRoomWeb 邮件通知系统是否正常工作</p>
         </div>
 
-        <!-- 新增：简化测试 -->
-        <div class="test-section">
-            <h3>🔧 调试测试</h3>
+        <!-- 测试项目网格 -->
+        <div class="test-grid">
+            <!-- 调试测试 -->
             <div class="test-card">
-                <div class="test-description">
-                    <h4>简化调试测试</h4>
-                    <p>直接测试邮件服务的基本连接，会输出详细的调试信息。</p>
+                <div class="card-header">
+                    <div class="card-icon">🔧</div>
+                    <div class="card-title">
+                        <h3>调试测试</h3>
+                        <p>直接测试邮件服务的基本连接，会输出详细的调试信息</p>
+                    </div>
                 </div>
-                <div class="test-action">
+                <div class="card-action">
                     <button @onclick="RunSimpleTest"
                             disabled="@IsTesting"
                             class="btn btn-debug">
                         @if (IsTesting && CurrentTest == "simple")
                         {
-                            <span>🔄 调试中...</span>
+                            <span class="btn-loading">🔄 调试中...</span>
                         }
                         else
                         {
@@ -49,22 +52,23 @@ else
                     </button>
                 </div>
             </div>
-        </div>
 
-        <div class="test-section">
-            <h3>基础邮件测试</h3>
+            <!-- 基础测试 -->
             <div class="test-card">
-                <div class="test-description">
-                    <h4>服务连通性测试</h4>
-                    <p>测试与 NotifyHubAPI 的连接是否正常，发送一封测试邮件到默认收件人。</p>
+                <div class="card-header">
+                    <div class="card-icon">🧪</div>
+                    <div class="card-title">
+                        <h3>服务连通性测试</h3>
+                        <p>测试与 NotifyHubAPI 的连接是否正常，发送一封测试邮件到默认收件人</p>
+                    </div>
                 </div>
-                <div class="test-action">
+                <div class="card-action">
                     <button @onclick="RunBasicTest"
                             disabled="@IsTesting"
                             class="btn btn-primary">
                         @if (IsTesting && CurrentTest == "basic")
                         {
-                            <span>🔄 测试中...</span>
+                            <span class="btn-loading">🔄 测试中...</span>
                         }
                         else
                         {
@@ -73,22 +77,23 @@ else
                     </button>
                 </div>
             </div>
-        </div>
 
-        <div class="test-section">
-            <h3>安全警报测试</h3>
+            <!-- 安全警报测试 -->
             <div class="test-card">
-                <div class="test-description">
-                    <h4>安全警报邮件</h4>
-                    <p>模拟安全事件，测试安全警报邮件的发送功能。</p>
+                <div class="card-header">
+                    <div class="card-icon">⚠️</div>
+                    <div class="card-title">
+                        <h3>安全警报邮件</h3>
+                        <p>模拟安全事件，测试安全警报邮件的发送功能</p>
+                    </div>
                 </div>
-                <div class="test-action">
+                <div class="card-action">
                     <button @onclick="RunSecurityTest"
                             disabled="@IsTesting"
                             class="btn btn-warning">
                         @if (IsTesting && CurrentTest == "security")
                         {
-                            <span>🔄 测试中...</span>
+                            <span class="btn-loading">🔄 测试中...</span>
                         }
                         else
                         {
@@ -97,22 +102,23 @@ else
                     </button>
                 </div>
             </div>
-        </div>
 
-        <div class="test-section">
-            <h3>系统通知测试</h3>
+            <!-- 系统通知测试 -->
             <div class="test-card">
-                <div class="test-description">
-                    <h4>系统通知邮件</h4>
-                    <p>测试系统通知邮件的发送功能。</p>
+                <div class="card-header">
+                    <div class="card-icon">📢</div>
+                    <div class="card-title">
+                        <h3>系统通知邮件</h3>
+                        <p>测试系统通知邮件的发送功能</p>
+                    </div>
                 </div>
-                <div class="test-action">
+                <div class="card-action">
                     <button @onclick="RunSystemNotificationTest"
                             disabled="@IsTesting"
                             class="btn btn-info">
                         @if (IsTesting && CurrentTest == "notification")
                         {
-                            <span>🔄 测试中...</span>
+                            <span class="btn-loading">🔄 测试中...</span>
                         }
                         else
                         {
@@ -123,53 +129,359 @@ else
             </div>
         </div>
 
+        <!-- 测试结果 -->
         @if (TestResults.Any())
         {
             <div class="results-section">
-                <h3>测试结果</h3>
-                <div class="results-container">
+                <h3>📊 测试结果</h3>
+                <div class="results-list">
                     @foreach (var result in TestResults.OrderByDescending(r => r.Timestamp))
                     {
                         <div class="result-item @(result.Success ? "success" : "error")">
                             <div class="result-header">
-                                <span class="result-type">@result.TestType</span>
-                                <span class="result-time">@result.Timestamp.ToString("HH:mm:ss")</span>
-                                <span class="result-status">@(result.Success ? "✅ 成功" : "❌ 失败")</span>
-                            </div>
-                            <div class="result-message">
-                                @result.Message
-                            </div>
-                            @if (!string.IsNullOrEmpty(result.Details))
-                            {
-                                <div class="result-details">
-                                    <strong>详细信息：</strong> @result.Details
+                                <div class="result-left">
+                                    <span class="result-icon">@(result.Success ? "✅" : "❌")</span>
+                                    <span class="result-type">@result.TestType</span>
                                 </div>
-                            }
+                                <span class="result-time">@result.Timestamp.ToString("HH:mm:ss")</span>
+                            </div>
+                            <div class="result-content">
+                                <div class="result-message">@result.Message</div>
+                                @if (!string.IsNullOrEmpty(result.Details))
+                                {
+                                    <div class="result-details">
+                                        <strong>详细信息：</strong>@result.Details
+                                    </div>
+                                }
+                            </div>
                         </div>
                     }
                 </div>
             </div>
         }
 
+        <!-- 操作按钮 -->
         <div class="actions-section">
-            <button @onclick="ClearResults" class="btn btn-secondary">🗑️ 清空结果</button>
-            <button @onclick="GoBack" class="btn btn-outline-secondary">← 返回管理后台</button>
+            <button @onclick="ClearResults" class="btn btn-secondary">
+                🗑️ 清空结果
+            </button>
+            <button @onclick="GoBack" class="btn btn-outline">
+                ← 返回管理后台
+            </button>
         </div>
     </div>
 }
 
 <style>
-    /* 现有样式保持不变... */
+    .email-test-page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .page-header {
+        text-align: center;
+        margin-bottom: 40px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #e9ecef;
+    }
+
+        .page-header h2 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+
+        .page-header p {
+            color: #666;
+            font-size: 1.1rem;
+            margin: 0;
+        }
+
+    .test-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 24px;
+        margin-bottom: 40px;
+    }
+
+    .test-card {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border: 1px solid #e9ecef;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+        .test-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+    .card-header {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 20px;
+    }
+
+    .card-icon {
+        font-size: 2rem;
+        flex-shrink: 0;
+    }
+
+    .card-title h3 {
+        margin: 0 0 8px 0;
+        color: #333;
+        font-size: 1.2rem;
+    }
+
+    .card-title p {
+        margin: 0;
+        color: #666;
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }
+
+    .card-action {
+        display: flex;
+        justify-content: center;
+    }
+
+    /* 按钮样式 */
+    .btn {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 500;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 160px;
+    }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
     .btn-debug {
-        background: #6f42c1;
+        background: linear-gradient(135deg, #6f42c1, #8e44ad);
         color: white;
     }
 
         .btn-debug:hover:not(:disabled) {
-            background: #5a32a3;
+            background: linear-gradient(135deg, #5a32a3, #7d3c98);
+            transform: translateY(-1px);
         }
 
-    /* 其他样式... */
+    .btn-primary {
+        background: linear-gradient(135deg, #007bff, #0056b3);
+        color: white;
+    }
+
+        .btn-primary:hover:not(:disabled) {
+            background: linear-gradient(135deg, #0056b3, #003d82);
+            transform: translateY(-1px);
+        }
+
+    .btn-warning {
+        background: linear-gradient(135deg, #ffc107, #e0a800);
+        color: #212529;
+    }
+
+        .btn-warning:hover:not(:disabled) {
+            background: linear-gradient(135deg, #e0a800, #d39e00);
+            transform: translateY(-1px);
+        }
+
+    .btn-info {
+        background: linear-gradient(135deg, #17a2b8, #138496);
+        color: white;
+    }
+
+        .btn-info:hover:not(:disabled) {
+            background: linear-gradient(135deg, #138496, #0f6674);
+            transform: translateY(-1px);
+        }
+
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #5a6268;
+            transform: translateY(-1px);
+        }
+
+    .btn-outline {
+        background: transparent;
+        color: #6c757d;
+        border: 2px solid #6c757d;
+    }
+
+        .btn-outline:hover:not(:disabled) {
+            background: #6c757d;
+            color: white;
+            transform: translateY(-1px);
+        }
+
+    .btn-loading {
+        animation: pulse 1.5s infinite;
+    }
+
+    @@keyframes pulse {
+        0%, 100%
+
+    {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+
+    }
+
+    /* 结果区域 */
+    .results-section {
+        margin-bottom: 40px;
+    }
+
+        .results-section h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.4rem;
+        }
+
+    .results-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .result-item {
+        background: white;
+        border-radius: 8px;
+        padding: 16px;
+        border-left: 4px solid;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+        .result-item.success {
+            border-left-color: #28a745;
+            background: #f8fff9;
+        }
+
+        .result-item.error {
+            border-left-color: #dc3545;
+            background: #fff8f8;
+        }
+
+    .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .result-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .result-icon {
+        font-size: 1.1rem;
+    }
+
+    .result-type {
+        font-weight: 600;
+        color: #333;
+    }
+
+    .result-time {
+        font-size: 0.85rem;
+        color: #666;
+        font-family: monospace;
+    }
+
+    .result-content {
+        color: #555;
+    }
+
+    .result-message {
+        margin-bottom: 4px;
+    }
+
+    .result-details {
+        font-size: 0.9rem;
+        color: #666;
+        font-style: italic;
+    }
+
+    /* 操作按钮区域 */
+    .actions-section {
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+        padding-top: 20px;
+        border-top: 1px solid #e9ecef;
+    }
+
+    /* 加载容器 */
+    .loading-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+
+    /* 响应式设计 */
+    @@media (max-width: 768px) {
+        .email-test-page
+
+    {
+        padding: 16px;
+    }
+
+    .test-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .test-card {
+        padding: 20px;
+    }
+
+    .card-header {
+        flex-direction: column;
+        text-align: center;
+        gap: 12px;
+    }
+
+    .page-header h2 {
+        font-size: 1.6rem;
+    }
+
+    .actions-section {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .btn {
+        width: 100%;
+        max-width: 250px;
+    }
+
+    }
 </style>
 
 @code {
@@ -199,7 +511,6 @@ else
         {
             var success = await EmailService.SimpleTestEmailServiceAsync();
 
-            // 写入文件日志，方便在 access-*.log 中追踪
             LoggingService.LogAccess("ADMIN", "EMAIL_TEST_SIMPLE",
                 success ? "SUCCESS" : "FAILED", "EmailTest.razor");
 
