@@ -25,7 +25,6 @@
       "applicationUrl": "https://localhost:5001;http://localhost:5000",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "VACANTROOM_EMAIL_APIKEY": "nh-prod-7K9mP3xR8wQ2nV5ag4yQWcL8sA9dE3tY7uI2oP6qW1zX5"
       }
     },
     "IIS Express": {

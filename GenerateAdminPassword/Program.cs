@@ -10,7 +10,7 @@ namespace VacantRoomWeb
         {
             Console.WriteLine("Generating hash for password: K9mP#3xR8qW$7nZ5");
 
-            var password = "K9mP#3xR8qW$7nZ5";
+            var password = "******"  //在此输入密码
             var (hash, salt) = CreatePasswordHash(password);
             var secretKey = GenerateSecretKey();
 
