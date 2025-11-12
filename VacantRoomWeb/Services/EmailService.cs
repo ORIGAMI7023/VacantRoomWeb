@@ -29,14 +29,281 @@ namespace VacantRoomWeb.Services
             _httpClient.Timeout = TimeSpan.FromSeconds(30);
         }
 
+
         public async Task<bool> SendSecurityAlertAsync(string subject, string message, string ipAddress = null)
         {
-            return await SendEmailAsync($"[安全告警] {subject}", message).ConfigureAwait(false);
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var formattedMessage = FormatSecurityAlert(subject, message, ipAddress, timestamp);
+
+            return await SendEmailAsync(
+                subject: $"[安全告警] {subject}",
+                body: formattedMessage,
+                category: "SECURITY",
+                isHtml: true,
+                priority: 1
+            ).ConfigureAwait(false);
         }
 
         public async Task<bool> SendSystemNotificationAsync(string subject, string message)
         {
-            return await SendEmailAsync($"[系统通知] {subject}", message).ConfigureAwait(false);
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var formattedMessage = FormatSystemNotification(subject, message, timestamp);
+
+            return await SendEmailAsync(
+                subject: $"[系统通知] {subject}",
+                body: formattedMessage,
+                category: "NOTIFICATION",
+                isHtml: true,
+                priority: 2
+            ).ConfigureAwait(false);
+        }
+
+        private string FormatSecurityAlert(string subject, string message, string ipAddress, string timestamp)
+        {
+            var serverName = Environment.MachineName;
+            var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 24px;
+        }}
+        .content {{
+            background: #fff;
+            padding: 30px;
+            border: 1px solid #dee2e6;
+            border-top: none;
+        }}
+        .alert-box {{
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }}
+        .info-table {{
+            width: 100%;
+            margin: 20px 0;
+            border-collapse: collapse;
+        }}
+        .info-table td {{
+            padding: 10px;
+            border-bottom: 1px solid #e9ecef;
+        }}
+        .info-table td:first-child {{
+            font-weight: bold;
+            width: 140px;
+            color: #495057;
+        }}
+        .footer {{
+            background: #f8f9fa;
+            padding: 15px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 12px;
+            border-radius: 0 0 8px 8px;
+            border: 1px solid #dee2e6;
+            border-top: none;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 4px 8px;
+            background: #dc3545;
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }}
+    </style>
+</head>
+<body>
+    <div class='header'>
+        <h1>🚨 安全告警</h1>
+        <p style='margin: 5px 0 0 0; opacity: 0.9;'>{subject}</p>
+    </div>
+    
+    <div class='content'>
+        <div class='alert-box'>
+            <strong>⚠️ 告警信息：</strong><br>
+            {message}
+        </div>
+        
+        <table class='info-table'>
+            <tr>
+                <td>🕐 发生时间</td>
+                <td>{timestamp}</td>
+            </tr>
+            <tr>
+                <td>🌐 来源IP</td>
+                <td><code>{ipAddress ?? "未知"}</code></td>
+            </tr>
+            <tr>
+                <td>🖥️ 服务器</td>
+                <td>{serverName}</td>
+            </tr>
+            <tr>
+                <td>📍 环境</td>
+                <td><span class='badge'>{environment}</span></td>
+            </tr>
+            <tr>
+                <td>🔗 系统</td>
+                <td>VacantRoomWeb 教室查询系统</td>
+            </tr>
+        </table>
+        
+        <p style='margin-top: 20px; padding: 15px; background: #e7f3ff; border-left: 4px solid #007bff; border-radius: 4px;'>
+            <strong>💡 提示：</strong> 请及时登录管理后台查看详细日志，必要时采取相应安全措施。
+        </p>
+    </div>
+    
+    <div class='footer'>
+        <p style='margin: 0;'>此邮件由 VacantRoomWeb 安全监控系统自动发送</p>
+        <p style='margin: 5px 0 0 0;'>服务器: {serverName} | 发送时间: {timestamp}</p>
+    </div>
+</body>
+</html>";
+        }
+
+        private string FormatSystemNotification(string subject, string message, string timestamp)
+        {
+            var serverName = Environment.MachineName;
+            var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+            var uptime = (DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).ToString(@"d\.hh\:mm\:ss");
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #17a2b8, #138496);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 24px;
+        }}
+        .content {{
+            background: #fff;
+            padding: 30px;
+            border: 1px solid #dee2e6;
+            border-top: none;
+        }}
+        .message-box {{
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+            border-left: 4px solid #17a2b8;
+        }}
+        .info-table {{
+            width: 100%;
+            margin: 20px 0;
+            border-collapse: collapse;
+        }}
+        .info-table td {{
+            padding: 10px;
+            border-bottom: 1px solid #e9ecef;
+        }}
+        .info-table td:first-child {{
+            font-weight: bold;
+            width: 140px;
+            color: #495057;
+        }}
+        .footer {{
+            background: #f8f9fa;
+            padding: 15px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 12px;
+            border-radius: 0 0 8px 8px;
+            border: 1px solid #dee2e6;
+            border-top: none;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 4px 8px;
+            background: #17a2b8;
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }}
+    </style>
+</head>
+<body>
+    <div class='header'>
+        <h1>📢 系统通知</h1>
+        <p style='margin: 5px 0 0 0; opacity: 0.9;'>{subject}</p>
+    </div>
+    
+    <div class='content'>
+        <div class='message-box'>
+            {message}
+        </div>
+        
+        <table class='info-table'>
+            <tr>
+                <td>🕐 发送时间</td>
+                <td>{timestamp}</td>
+            </tr>
+            <tr>
+                <td>🖥️ 服务器</td>
+                <td>{serverName}</td>
+            </tr>
+            <tr>
+                <td>📍 环境</td>
+                <td><span class='badge'>{environment}</span></td>
+            </tr>
+            <tr>
+                <td>⏱️ 运行时长</td>
+                <td>{uptime}</td>
+            </tr>
+            <tr>
+                <td>🔗 系统</td>
+                <td>VacantRoomWeb 教室查询系统</td>
+            </tr>
+        </table>
+    </div>
+    
+    <div class='footer'>
+        <p style='margin: 0;'>此邮件由 VacantRoomWeb 系统自动发送</p>
+        <p style='margin: 5px 0 0 0;'>服务器: {serverName} | 发送时间: {timestamp}</p>
+    </div>
+</body>
+</html>";
         }
 
         public async Task<bool> TestEmailServiceAsync()
