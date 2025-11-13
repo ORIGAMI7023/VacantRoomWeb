@@ -14,7 +14,7 @@ RestartSec=5
 SyslogIdentifier=vacantroomweb
 User=nginx
 Environment="ASPNETCORE_ENVIRONMENT=Production"
-Environment="ASPNETCORE_URLS=http://127.0.0.1:5001"
+Environment="ASPNETCORE_URLS=http://127.0.0.1:5003"
 Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
 
 # ========== 管理员配置（手动填入） ==========
