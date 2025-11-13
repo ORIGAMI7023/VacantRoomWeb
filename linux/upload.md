@@ -17,7 +17,7 @@ sudo chown -R nginx:nginx /var/www/vacantroomweb/logs
 scp D:\Programing\C#\VacantRoomWeb\linux\v.downf.cn.conf root@downf.cn:/etc/nginx/conf.d/v.downf.cn.conf
 
 # 上传 systemd 服务配置
-scp D:\Programing\C#\VacantRoomWeb\linux\notifyhub.service root@downf.cn:/etc/systemd/system/notifyhub.service
+scp D:\Programing\C#\VacantRoomWeb\linux\vacantroomweb.service root@downf.cn:/etc/systemd/system/vacantroomweb.service
 ```
 
 

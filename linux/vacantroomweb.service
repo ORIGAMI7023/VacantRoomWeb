@@ -1,0 +1,32 @@
+# systemd 服务配置 - VacantRoomWeb
+# 路径: /etc/systemd/system/vacantroomweb.service
+# 最后更新: 2025-11-13
+
+[Unit]
+Description=VacantRoomWeb Classroom Query System
+After=network.target
+
+[Service]
+WorkingDirectory=/var/www/vacantroomweb
+ExecStart=/usr/bin/dotnet /var/www/vacantroomweb/VacantRoomWeb.dll
+Restart=always
+RestartSec=5
+SyslogIdentifier=vacantroomweb
+User=nginx
+Environment="ASPNETCORE_ENVIRONMENT=Production"
+Environment="ASPNETCORE_URLS=http://127.0.0.1:5001"
+Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
+
+# ========== 管理员配置（手动填入） ==========
+Environment="VACANTROOM_ADMIN_USERNAME=YOUR_ADMIN_USERNAME"
+Environment="VACANTROOM_ADMIN_PASSWORDHASH=YOUR_PASSWORD_HASH_HERE"
+Environment="VACANTROOM_ADMIN_SALT=YOUR_SALT_HERE"
+Environment="VACANTROOM_ADMIN_SECRETKEY=YOUR_SECRET_KEY_HERE"
+
+# ========== 邮件服务配置（手动填入） ==========
+Environment="VACANTROOM_EMAIL_BASEURL=https://notify.downf.cn"
+Environment="VACANTROOM_EMAIL_APIKEY=YOUR_NOTIFY_API_KEY_HERE"
+Environment="VACANTROOM_EMAIL_RECIPIENT=YOUR_EMAIL_ADDRESS_HERE"
+
+[Install]
+WantedBy=multi-user.target
