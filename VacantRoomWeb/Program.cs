@@ -1,10 +1,19 @@
 using Microsoft.AspNetCore.Components.Server.Circuits;
+using Microsoft.AspNetCore.HttpOverrides;
 using VacantRoomWeb.Components;
 using VacantRoomWeb.Handlers;
 using VacantRoomWeb.Middleware;
 using VacantRoomWeb.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure forwarded headers to get real client IP from nginx
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 // Add Blazor services
 builder.Services.AddRazorComponents()
@@ -48,7 +57,7 @@ builder.Services.AddSingleton<CircuitHandler, ConnectionLoggingCircuitHandler>()
 
 var app = builder.Build();
 
-// ¼ÇÂ¼Ó¦ÓÃ³ÌÐòÆô¶¯
+// ï¿½ï¿½Â¼Ó¦ï¿½Ã³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 var startupService = app.Services.GetRequiredService<IStartupLoggingService>();
 startupService.RecordStart();
 
@@ -58,6 +67,8 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
+
+app.UseForwardedHeaders();
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
