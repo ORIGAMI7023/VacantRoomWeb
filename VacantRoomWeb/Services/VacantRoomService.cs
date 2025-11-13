@@ -404,7 +404,18 @@ namespace VacantRoomWeb.Services
                 var norm = Normalize(text);
                 var idx = norm.IndexOfAny("一二三四五六日".ToCharArray());
                 if (idx >= 0 && idx + 1 < norm.Length)
+                {
                     return norm.Substring(idx + 1);
+                }
+                // 如果没找到中文数字，可能是纯数字格式，直接返回norm
+                // 但需要确保它包含数字和连字符
+                if (norm.Contains("-") && norm.Any(char.IsDigit))
+                {
+                    // 提取数字和连字符部分
+                    var match = System.Text.RegularExpressions.Regex.Match(norm, @"\d+-\d+");
+                    if (match.Success)
+                        return match.Value;
+                }
                 return "";
             }
 
@@ -429,8 +440,8 @@ namespace VacantRoomWeb.Services
             if (TryParseRange(rowRange, out int rowStart, out int rowEnd) &&
                 TryParseRange(userRange, out int userStart, out int userEnd))
             {
-                // 判断两个时间段是否有重叠：课程时间和用户查询时间有任何重叠就表示教室被占用
-                return rowEnd >= userStart && rowStart <= userEnd;
+                // 原始逻辑：判断用户查询时间是否在课程时间范围内
+                return userStart >= rowStart && userEnd <= rowEnd;
             }
 
             return false;
