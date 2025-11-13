@@ -52,6 +52,16 @@ namespace VacantRoomWeb.Services
                 return false;
             }
 
+            // 调试日志：记录配置和验证信息
+            var configDebug = $"ConfigUser:{adminConfig.Username} InputUser:{username} UsernameMatch:{adminConfig.Username == username}";
+            _logger.LogAccess(ip, "ADMIN_LOGIN_DEBUG", configDebug, userAgent);
+
+            // 调试日志：计算输入密码的哈希
+            var inputHash = ComputePasswordHash(password, adminConfig.Salt);
+            var hashMatch = inputHash == adminConfig.PasswordHash;
+            var hashDebug = $"InputHash:{inputHash.Substring(0, Math.Min(20, inputHash.Length))}... StoredHash:{adminConfig.PasswordHash.Substring(0, Math.Min(20, adminConfig.PasswordHash.Length))}... Match:{hashMatch}";
+            _logger.LogAccess(ip, "ADMIN_PASSWORD_DEBUG", hashDebug, userAgent);
+
             bool isValid = adminConfig.Username == username &&
                           VerifyPassword(password, adminConfig.PasswordHash, adminConfig.Salt);
 
