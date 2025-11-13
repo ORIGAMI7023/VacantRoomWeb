@@ -429,7 +429,8 @@ namespace VacantRoomWeb.Services
             if (TryParseRange(rowRange, out int rowStart, out int rowEnd) &&
                 TryParseRange(userRange, out int userStart, out int userEnd))
             {
-                return userStart >= rowStart && userEnd <= rowEnd;
+                // 判断两个时间段是否有重叠：课程时间和用户查询时间有任何重叠就表示教室被占用
+                return rowEnd >= userStart && rowStart <= userEnd;
             }
 
             return false;
