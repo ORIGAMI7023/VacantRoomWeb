@@ -103,8 +103,6 @@ namespace VacantRoomWeb.Services
             }
 
             var occupiedRooms = new HashSet<string>();
-            int totalRows = 0;
-            int matchedRows = 0;
 
             try
             {
@@ -113,7 +111,6 @@ namespace VacantRoomWeb.Services
 
                 foreach (var row in sheet.RowsUsed().Skip(1))
                 {
-                    totalRows++;
                     var rowCampus = row.Cell(10).GetString();
                     var rowTime = row.Cell(14).GetString();
                     var rowWeeks = row.Cell(15).GetString();
@@ -125,11 +122,7 @@ namespace VacantRoomWeb.Services
                     if (!IsPeriodMatch(rowTime, weekday, period)) continue;
                     if (!IsWeekMatch(rowWeeks, week)) continue;
 
-                    matchedRows++;
                     occupiedRooms.Add(room);
-
-                    // 调试日志：记录匹配的课程
-                    _logger.LogAccess(ip, "DEBUG_MATCH", $"Room:{room} Time:{rowTime} Week:{rowWeeks}", "");
                 }
 
                 var allRooms = list;
@@ -141,7 +134,7 @@ namespace VacantRoomWeb.Services
                 // 只在需要时记录查询结果
                 if (shouldLog)
                 {
-                    _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} vacant rooms (Total:{totalRows} Matched:{matchedRows} Occupied:{occupiedRooms.Count})", "");
+                    _logger.LogAccess(ip, "QUERY_RESULT", $"Found {result.Count} vacant rooms", "");
                     _notificationService.NotifyLogsUpdated();
                 }
 
