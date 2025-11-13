@@ -1,0 +1,29 @@
+# systemd 服务配置 - NotifyHub API
+# 路径: /etc/systemd/system/notifyhub.service
+# 最后更新: 2025-11-12
+
+[Unit]
+Description=NotifyHub Email Notification API Service
+After=network.target
+
+[Service]
+WorkingDirectory=/var/www/notifyhub
+ExecStart=/usr/bin/dotnet /var/www/notifyhub/NotifyHubAPI.dll
+Restart=always
+RestartSec=5
+SyslogIdentifier=notifyhub
+User=nginx
+Environment="ASPNETCORE_ENVIRONMENT=Production"
+Environment="ASPNETCORE_URLS=http://127.0.0.1:5002"
+Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
+Environment="NOTIFYHUB_APIKEY_DEFAULT=nh-prod-Y63jT32xDaxWy1Ek******"
+Environment="NOTIFYHUB_SMTP_HOST=smtp.qq.com"
+Environment="NOTIFYHUB_SMTP_PORT=587"
+Environment="NOTIFYHUB_SMTP_USESSL=true"
+Environment="NOTIFYHUB_SMTP_USERNAME=2840080918@qq.com"
+Environment="NOTIFYHUB_SMTP_PASSWORD=trjw******"
+Environment="NOTIFYHUB_SMTP_FROMEMAIL=2840080918@qq.com"
+Environment="NOTIFYHUB_SMTP_FROMNAME=NotifyHub"
+
+[Install]
+WantedBy=multi-user.target
