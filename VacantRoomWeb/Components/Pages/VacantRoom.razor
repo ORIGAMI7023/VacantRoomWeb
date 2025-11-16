@@ -91,7 +91,9 @@
                     <div class="result-list">
                         @foreach (var room in VacantResult)
                         {
-                            <span class="room-item">@room</span>
+                            <button class="room-item clickable" @onclick="() => ViewRoomUsage(room)">
+                                @room
+                            </button>
                         }
                     </div>
                 </div>
@@ -409,7 +411,24 @@
         border-radius: 20px;
         font-size: 0.9rem;
         font-weight: 500;
+        border: none;
+        cursor: default;
     }
+
+    .room-item.clickable {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+        .room-item.clickable:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 6px rgba(0, 123, 255, 0.3);
+        }
+
+        .room-item.clickable:active {
+            transform: translateY(0);
+        }
 
     .usage-result {
         background: #f8f9fa;
@@ -651,6 +670,28 @@
 
         // 调用服务获取教室使用情况
         UsageResult = VacantService.GetRoomUsage(RoomCampus, RoomBuilding + RoomNumber, RoomWeekday, RoomWeek);
+    }
+
+    void ViewRoomUsage(string roomName)
+    {
+        // 解析教室名称，如 A101 → 楼栋A，房间号101
+        if (string.IsNullOrEmpty(roomName) || roomName.Length < 2) return;
+
+        var building = roomName.Substring(0, 1); // 第一个字符是楼栋
+        var number = roomName.Substring(1);      // 剩余部分是房间号
+
+        // 设置教室使用情况查询的参数
+        RoomCampus = Campus;
+        RoomBuilding = building;
+        RoomNumber = number;
+        RoomWeekday = Weekday;
+        RoomWeek = Week;
+
+        // 切换到教室使用情况查询标签页
+        ActiveTab = 1;
+
+        // 自动执行查询
+        QueryRoomUsage();
     }
 
     void OnBuildingChanged(ChangeEventArgs e)
