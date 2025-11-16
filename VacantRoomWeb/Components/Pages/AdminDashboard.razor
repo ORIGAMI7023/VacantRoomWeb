@@ -8,6 +8,7 @@
 @inject IJSRuntime JSRuntime
 @inject ApplicationStartupService StartupService
 @inject IEmailService EmailService
+@inject EmailSettingsService EmailSettingsService
 @inject IConfiguration Configuration
 @using VacantRoomWeb.Models
 @using VacantRoomWeb.Services
@@ -306,34 +307,33 @@ else
 
                         <div class="action-group">
                             <h4>安全警报设置</h4>
-                            <div class="alert-settings disabled">
+                            <div class="alert-settings">
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" disabled @bind="EmailSettings.EnableDDoSAlerts" />
+                                        <input type="checkbox" @bind="EmailSettings.EnableDDoSAlerts" />
                                         DDoS攻击警报
                                     </label>
                                 </div>
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" disabled @bind="EmailSettings.EnableBruteForceAlerts" />
+                                        <input type="checkbox" @bind="EmailSettings.EnableBruteForceAlerts" />
                                         暴力破解警报
                                     </label>
                                 </div>
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" disabled @bind="EmailSettings.EnableSystemLockdownAlerts" />
+                                        <input type="checkbox" @bind="EmailSettings.EnableSystemLockdownAlerts" />
                                         系统锁定警报
                                     </label>
                                 </div>
                                 <div class="setting-item">
                                     <label>
-                                        <input type="checkbox" disabled @bind="EmailSettings.EnableIPBanAlerts" />
+                                        <input type="checkbox" @bind="EmailSettings.EnableIPBanAlerts" />
                                         IP封禁警报
                                     </label>
                                 </div>
 
-                                <button @onclick="SaveEmailSettings" disabled class="btn btn-success btn-sm disabled">💾 保存设置 (开发中)</button>
-                                <p class="feature-notice">此功能正在开发中，暂时不可用</p>
+                                <button @onclick="SaveEmailSettings" class="btn btn-success btn-sm">💾 保存设置</button>
                             </div>
                         </div>
 
@@ -389,6 +389,25 @@ else
             }
         </div>
     </div>
+
+    <!-- 日志查看模态框 -->
+    @if (ShowLogModal)
+    {
+        <div class="modal-overlay" @onclick="CloseLogModal">
+            <div class="modal-dialog" @onclick:stopPropagation="true">
+                <div class="modal-header">
+                    <h4>查看日志文件: @SelectedLogDate</h4>
+                    <button @onclick="CloseLogModal" class="btn-close">×</button>
+                </div>
+                <div class="modal-body">
+                    <pre class="log-content">@SelectedLogContent</pre>
+                </div>
+                <div class="modal-footer">
+                    <button @onclick="CloseLogModal" class="btn btn-secondary">关闭</button>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 <style>
@@ -980,6 +999,87 @@ else
         padding: 15px;
     }
 
+    /* 模态框样式 */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .modal-dialog {
+        background: white;
+        border-radius: 8px;
+        width: 90%;
+        max-width: 1000px;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px;
+        border-bottom: 1px solid #e1e5e9;
+    }
+
+        .modal-header h4 {
+            margin: 0;
+            color: #333;
+        }
+
+    .btn-close {
+        background: none;
+        border: none;
+        font-size: 28px;
+        line-height: 1;
+        color: #999;
+        cursor: pointer;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+    }
+
+        .btn-close:hover {
+            color: #333;
+        }
+
+    .modal-body {
+        padding: 20px;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    .modal-footer {
+        padding: 15px 20px;
+        border-top: 1px solid #e1e5e9;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .log-content {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        padding: 15px;
+        border-radius: 4px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow-x: auto;
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
     }
 </style>
 
@@ -1007,6 +1107,11 @@ else
     private bool EmailTestSuccess = false;
     private string ManualEmailSubject = "";
     private string ManualEmailContent = "";
+
+    // 日志查看模态框相关变量
+    private bool ShowLogModal = false;
+    private string SelectedLogDate = "";
+    private string SelectedLogContent = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -1062,12 +1167,13 @@ else
     {
         try
         {
-            // 这里需要实现邮件统计逻辑
+            // 获取真实的邮件统计数据
+            var stats = EmailService.GetEmailStats();
             EmailStats = new Dictionary<string, object>
             {
-                ["TotalSent"] = "N/A",
-                ["SuccessRate"] = "N/A",
-                ["LastSent"] = "未发送"
+                ["TotalSent"] = stats.TotalSent.ToString(),
+                ["SuccessRate"] = stats.SuccessRate.ToString("F1"),
+                ["LastSent"] = stats.LastSentTimeFormatted
             };
 
             EmailConfig = new Dictionary<string, string>
@@ -1077,11 +1183,15 @@ else
                 ["Cooldown"] = Configuration["Email:CooldownMinutes"] ?? "5",
                 ["ServiceStatus"] = "正常"
             };
+
+            // 加载邮件警报设置
+            EmailSettings = EmailSettingsService.GetSettings();
         }
         catch (Exception ex)
         {
             EmailStats["Error"] = ex.Message;
         }
+        await Task.CompletedTask;
     }
 
     private async Task RefreshData()
@@ -1143,8 +1253,28 @@ else
 
     private async Task ViewLogFile(string date)
     {
-        // 查看日志文件逻辑
+        try
+        {
+            SelectedLogDate = date;
+            SelectedLogContent = LoggingService.ReadLogFile(date);
+            ShowLogModal = true;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            SelectedLogContent = $"读取日志文件失败: {ex.Message}";
+            ShowLogModal = true;
+            StateHasChanged();
+        }
         await Task.CompletedTask;
+    }
+
+    private void CloseLogModal()
+    {
+        ShowLogModal = false;
+        SelectedLogDate = "";
+        SelectedLogContent = "";
+        StateHasChanged();
     }
 
     private void NavigateToEmailTest()
@@ -1178,9 +1308,27 @@ else
 
     private async Task SaveEmailSettings()
     {
-        // 保存邮件设置逻辑
-        await Task.CompletedTask;
+        try
+        {
+            var success = EmailSettingsService.SaveSettings(EmailSettings);
+            if (success)
+            {
+                EmailTestResult = "警报设置已保存成功！";
+                EmailTestSuccess = true;
+            }
+            else
+            {
+                EmailTestResult = "保存设置失败，请查看服务器日志。";
+                EmailTestSuccess = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            EmailTestResult = $"保存设置时发生错误：{ex.Message}";
+            EmailTestSuccess = false;
+        }
         StateHasChanged();
+        await Task.CompletedTask;
     }
 
     private async Task SendManualEmail()

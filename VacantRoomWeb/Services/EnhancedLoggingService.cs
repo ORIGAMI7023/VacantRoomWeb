@@ -461,6 +461,46 @@ namespace VacantRoomWeb.Services
             }
         }
 
+        public string ReadLogFile(string date)
+        {
+            try
+            {
+                var fileName = $"access-{date}.log";
+                var filePath = Path.Combine(_logDirectory, fileName);
+
+                if (!File.Exists(filePath))
+                {
+                    return $"日志文件不存在: {fileName}";
+                }
+
+                // 读取文件内容，限制最多读取10000行以防止内存溢出
+                var lines = new List<string>();
+                using var reader = new StreamReader(filePath, Encoding.UTF8);
+                int lineCount = 0;
+                while (!reader.EndOfStream && lineCount < 10000)
+                {
+                    var line = reader.ReadLine();
+                    if (line != null)
+                    {
+                        lines.Add(line);
+                        lineCount++;
+                    }
+                }
+
+                if (!reader.EndOfStream)
+                {
+                    lines.Add($"\n... 文件过大，仅显示前 {lineCount} 行 ...");
+                }
+
+                return string.Join("\n", lines);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "读取日志文件失败: {Date}", date);
+                return $"读取日志文件失败: {ex.Message}";
+            }
+        }
+
         public void ForceRefreshStats()
         {
             // 对于基于文件的系统，统计数据总是最新的，无需特殊刷新操作

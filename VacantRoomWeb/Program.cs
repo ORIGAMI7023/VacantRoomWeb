@@ -45,6 +45,7 @@ builder.Services.AddSingleton<ApplicationStartupService>(provider =>
     new ApplicationStartupService(provider.GetRequiredService<IStartupLoggingService>()));
 
 // Register security and other services
+builder.Services.AddSingleton<EmailSettingsService>();
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<AdminAuthService>();
 

@@ -15,6 +15,7 @@ namespace VacantRoomWeb.Services
     {
         private readonly EnhancedLoggingService _logger;
         private readonly IEmailService _emailService;
+        private readonly EmailSettingsService _emailSettingsService;
 
         // IP tracking for rate limiting
         private readonly ConcurrentDictionary<string, List<DateTime>> _ipRequests = new();
@@ -28,10 +29,11 @@ namespace VacantRoomWeb.Services
 
         private readonly object _lockObject = new();
 
-        public SecurityService(EnhancedLoggingService logger, IEmailService emailService)
+        public SecurityService(EnhancedLoggingService logger, IEmailService emailService, EmailSettingsService emailSettingsService)
         {
             _logger = logger;
             _emailService = emailService;
+            _emailSettingsService = emailSettingsService;
         }
 
         public bool IsIPBanned(string ip)
@@ -87,12 +89,15 @@ namespace VacantRoomWeb.Services
                     BanIP(ip, TimeSpan.FromMinutes(15), "DDoS_DETECTED"); // 减少到15分钟
                     _logger.LogAccess(ip, "SECURITY_DDOS_DETECTED", $"Requests in 1min: {requestCount}", userAgent);
 
-                    // 异步发送邮件警报
-                    _ = Task.Run(async () =>
+                    // 异步发送邮件警报（检查设置）
+                    if (_emailSettingsService.IsDDoSAlertEnabled())
                     {
-                        await TriggerEmailAlertAsync("DDoS Attack Detected",
-                            $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.", ip);
-                    });
+                        _ = Task.Run(async () =>
+                        {
+                            await TriggerEmailAlertAsync("DDoS Attack Detected",
+                                $"IP {ip} made {requestCount} requests in 1 minute and has been banned for 15 minutes.", ip);
+                        });
+                    }
 
                     return false;
                 }
@@ -143,12 +148,15 @@ namespace VacantRoomWeb.Services
                     _recentBreachAttempts.RemoveAll(time => time < tenMinutesAgo);
                     _recentBreachAttempts.Add(now);
 
-                    // 异步发送邮件警报
-                    _ = Task.Run(async () =>
+                    // 异步发送邮件警报（检查设置）
+                    if (_emailSettingsService.IsBruteForceAlertEnabled())
                     {
-                        await TriggerEmailAlertAsync("Brute Force Attack Detected",
-                            $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.", ip);
-                    });
+                        _ = Task.Run(async () =>
+                        {
+                            await TriggerEmailAlertAsync("Brute Force Attack Detected",
+                                $"IP {ip} attempted {failedCount} failed logins in 5 minutes and has been banned for 30 minutes.", ip);
+                        });
+                    }
 
                     // 系统锁定：10分钟内5个不同IP的暴力破解
                     var recentUniqueAttackers = _loginAttempts
@@ -160,12 +168,15 @@ namespace VacantRoomWeb.Services
                         _adminPanelLockdownUntil = now.AddMinutes(15); // 减少到15分钟
                         _logger.LogAccess(ip, "SECURITY_ADMIN_LOCKDOWN", $"Admin panel locked for 15 minutes due to {recentUniqueAttackers} attackers", userAgent);
 
-                        // 异步发送系统锁定警报
-                        _ = Task.Run(async () =>
+                        // 异步发送系统锁定警报（检查设置）
+                        if (_emailSettingsService.IsSystemLockdownAlertEnabled())
                         {
-                            await TriggerEmailAlertAsync("CRITICAL: Admin Panel Locked",
-                                $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}", ip);
-                        });
+                            _ = Task.Run(async () =>
+                            {
+                                await TriggerEmailAlertAsync("CRITICAL: Admin Panel Locked",
+                                    $"Admin panel has been locked for 15 minutes due to {recentUniqueAttackers} different IPs attempting brute force attacks. Latest attacker: {ip}", ip);
+                            });
+                        }
                     }
 
                     return false;
@@ -188,6 +199,16 @@ namespace VacantRoomWeb.Services
             _bannedIPs.AddOrUpdate(ip, banUntil, (key, oldTime) => banUntil);
 
             _logger.LogAccess(ip, "SECURITY_IP_BANNED", $"Reason: {reason}, Duration: {duration.TotalMinutes} minutes");
+
+            // 发送IP封禁警报（检查设置）
+            if (_emailSettingsService.IsIPBanAlertEnabled())
+            {
+                _ = Task.Run(async () =>
+                {
+                    await TriggerEmailAlertAsync("IP Banned",
+                        $"IP {ip} has been banned for {duration.TotalMinutes} minutes. Reason: {reason}", ip);
+                });
+            }
         }
 
         // 更新为异步邮件警报方法
