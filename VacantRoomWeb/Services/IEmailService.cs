@@ -1,4 +1,6 @@
 ﻿// Services/IEmailService.cs
+using VacantRoomWeb.Models;
+
 namespace VacantRoomWeb.Services
 {
     public interface IEmailService
@@ -9,5 +11,6 @@ namespace VacantRoomWeb.Services
         Task<bool> SimpleTestEmailServiceAsync(); // 新增简化测试方法
         void SendSecurityAlert(string subject, string message);
         void SendSystemNotification(string subject, string message);
+        EmailStats GetEmailStats(); // 获取邮件统计数据
     }
 }

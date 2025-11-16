@@ -1,6 +1,7 @@
 ﻿// Services/EmailService.cs - 更新版本使用ConfigurationService
 using System.Text;
 using System.Text.Json;
+using VacantRoomWeb.Models;
 
 namespace VacantRoomWeb.Services
 {
@@ -12,6 +13,13 @@ namespace VacantRoomWeb.Services
         private readonly Dictionary<string, DateTime> _lastSentTimes = new();
         private readonly object _cooldownLock = new();
         private readonly EnhancedLoggingService _fileLog;
+
+        // 邮件统计数据
+        private int _totalSent = 0;
+        private int _successCount = 0;
+        private int _failureCount = 0;
+        private DateTime? _lastSentTime = null;
+        private readonly object _statsLock = new();
 
 
         public EmailService(HttpClient httpClient, IConfigurationService configService, ILogger<EmailService> logger, EnhancedLoggingService fileLog)
@@ -440,6 +448,7 @@ namespace VacantRoomWeb.Services
                     _fileLog?.LogAccess("SERVER", "EMAIL_API_FAIL",
                         $"{(int)response.StatusCode}:{response.ReasonPhrase} | {(respBody?.Length > 300 ? respBody.Substring(0, 300) + "..." : respBody)}",
                         "EmailService", endpoint);
+                    RecordEmailSent(false);
                     return false;
                 }
 
@@ -447,12 +456,16 @@ namespace VacantRoomWeb.Services
                 _fileLog?.LogAccess("SERVER", "EMAIL_API_SUCCESS",
                     $"{(int)response.StatusCode} | {(respBody?.Length > 200 ? respBody.Substring(0, 200) + "..." : respBody)}",
                     "EmailService", endpoint);
+
+                // 记录成功统计
+                RecordEmailSent(true);
                 return true;
             }
             catch (TaskCanceledException tex)
             {
                 _logger.LogError(tex, "Email API request timed out");
                 _fileLog?.LogAccess("SERVER", "EMAIL_API_EXCEPTION", "TIMEOUT", "EmailService", "/api/email/send");
+                RecordEmailSent(false);
                 return false;
             }
             catch (Exception ex)
@@ -461,6 +474,7 @@ namespace VacantRoomWeb.Services
                 _fileLog?.LogAccess("SERVER", "EMAIL_API_EXCEPTION",
                     ex.Message?.Length > 300 ? ex.Message.Substring(0, 300) + "..." : ex.Message,
                     "EmailService", "/api/email/send");
+                RecordEmailSent(false);
                 return false;
             }
         }
@@ -510,6 +524,35 @@ namespace VacantRoomWeb.Services
         {
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             return $@"<html><body><h2>Email Service Test</h2><p>VacantRoomWeb email service is working correctly.</p><p>Test time: {timestamp}</p></body></html>";
+        }
+
+        // 记录邮件发送统计
+        private void RecordEmailSent(bool success)
+        {
+            lock (_statsLock)
+            {
+                _totalSent++;
+                _lastSentTime = DateTime.Now;
+                if (success)
+                    _successCount++;
+                else
+                    _failureCount++;
+            }
+        }
+
+        // 获取邮件统计数据
+        public EmailStats GetEmailStats()
+        {
+            lock (_statsLock)
+            {
+                return new EmailStats
+                {
+                    TotalSent = _totalSent,
+                    SuccessCount = _successCount,
+                    FailureCount = _failureCount,
+                    LastSentTime = _lastSentTime
+                };
+            }
         }
     }
 }
