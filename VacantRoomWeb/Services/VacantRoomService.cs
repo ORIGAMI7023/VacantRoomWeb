@@ -1,5 +1,6 @@
 ﻿using ClosedXML.Excel;
 using Microsoft.AspNetCore.Components.Server.Circuits;
+using Microsoft.Extensions.Caching.Memory;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,6 +8,23 @@ using VacantRoomWeb.Handlers;
 
 namespace VacantRoomWeb.Services
 {
+    // Excel缓存数据结构
+    public class ExcelCacheData
+    {
+        public List<ScheduleRow> Rows { get; set; } = new();
+        public DateTime LastModified { get; set; }
+    }
+
+    public class ScheduleRow
+    {
+        public string Campus { get; set; } = "";
+        public string Time { get; set; } = "";
+        public string Weeks { get; set; } = "";
+        public string Room { get; set; } = "";
+        public string CourseName { get; set; } = "";
+        public string Teacher { get; set; } = "";
+    }
+
     public class VacantRoomService
     {
         private readonly ConnectionCounterService _counter;
@@ -15,6 +33,13 @@ namespace VacantRoomWeb.Services
         private readonly EnhancedLoggingService _logger;
         private readonly IConfiguration _configuration;
         private readonly NotificationService _notificationService;
+        private readonly IMemoryCache _cache;
+        private readonly ILogger<VacantRoomService> _serviceLogger;
+
+        // Excel文件监听器
+        private FileSystemWatcher? _fileWatcher;
+        private readonly string _excelFilePath;
+        private const string CacheKey = "ScheduleExcelData";
 
         // 用于控制用户查询频率，避免日志膨胀
         private readonly Dictionary<string, DateTime> _lastQueryTime = new();
@@ -27,7 +52,9 @@ namespace VacantRoomWeb.Services
             IHttpContextAccessor httpContextAccessor,
             EnhancedLoggingService logger,
             IConfiguration configuration,
-            NotificationService notificationService)
+            NotificationService notificationService,
+            IMemoryCache cache,
+            ILogger<VacantRoomService> serviceLogger)
         {
             _counter = counter;
             _ipTracker = ipTracker;
@@ -35,6 +62,104 @@ namespace VacantRoomWeb.Services
             _logger = logger;
             _configuration = configuration;
             _notificationService = notificationService;
+            _cache = cache;
+            _serviceLogger = serviceLogger;
+
+            _excelFilePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
+            InitializeFileWatcher();
+        }
+
+        private void InitializeFileWatcher()
+        {
+            try
+            {
+                var dataDir = Path.GetDirectoryName(_excelFilePath);
+                if (string.IsNullOrEmpty(dataDir) || !Directory.Exists(dataDir))
+                {
+                    _serviceLogger?.LogWarning("Data directory does not exist: {Path}", dataDir);
+                    return;
+                }
+
+                _fileWatcher = new FileSystemWatcher(dataDir)
+                {
+                    Filter = "schedule.xlsx",
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                    EnableRaisingEvents = true
+                };
+
+                _fileWatcher.Changed += (sender, e) =>
+                {
+                    // 文件变化时清除缓存
+                    _cache.Remove(CacheKey);
+                    _serviceLogger?.LogInformation("Excel file changed, cache cleared: {Path}", e.FullPath);
+                };
+            }
+            catch (Exception ex)
+            {
+                _serviceLogger?.LogError(ex, "Failed to initialize file watcher for {Path}", _excelFilePath);
+            }
+        }
+
+        private ExcelCacheData LoadExcelData()
+        {
+            if (!File.Exists(_excelFilePath))
+            {
+                _serviceLogger?.LogError("Excel file not found: {Path}", _excelFilePath);
+                return new ExcelCacheData();
+            }
+
+            try
+            {
+                var fileInfo = new FileInfo(_excelFilePath);
+                var cacheData = new ExcelCacheData
+                {
+                    LastModified = fileInfo.LastWriteTime
+                };
+
+                using var workbook = new XLWorkbook(_excelFilePath);
+                var sheet = workbook.Worksheets.First();
+
+                foreach (var row in sheet.RowsUsed().Skip(1))
+                {
+                    var campus = row.Cell(10).GetString();
+                    var time = row.Cell(14).GetString();
+                    var weeks = row.Cell(15).GetString();
+                    var room = row.Cell(16).GetString();
+                    var courseName = row.Cell(5).GetString();
+                    var teacher = row.Cell(12).GetString();
+
+                    if (!string.IsNullOrEmpty(room))
+                    {
+                        cacheData.Rows.Add(new ScheduleRow
+                        {
+                            Campus = campus,
+                            Time = time,
+                            Weeks = weeks,
+                            Room = room,
+                            CourseName = courseName,
+                            Teacher = teacher
+                        });
+                    }
+                }
+
+                _serviceLogger?.LogInformation("Loaded {Count} rows from Excel file", cacheData.Rows.Count);
+                return cacheData;
+            }
+            catch (Exception ex)
+            {
+                _serviceLogger?.LogError(ex, "Failed to load Excel file: {Path}", _excelFilePath);
+                return new ExcelCacheData();
+            }
+        }
+
+        private ExcelCacheData GetCachedExcelData()
+        {
+            return _cache.GetOrCreate(CacheKey, entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24); // 24小时过期
+                entry.SlidingExpiration = TimeSpan.FromHours(1); // 1小时不访问则过期
+                return LoadExcelData();
+            }) ?? new ExcelCacheData();
         }
 
         List<string> list = new List<string> { "A101", "A102", "A103", "A104", "A105", "A106",
@@ -93,36 +218,28 @@ namespace VacantRoomWeb.Services
                 _notificationService.NotifyLogsUpdated();
             }
 
-            var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
-            if (!File.Exists(filePath))
-            {
-                // 错误情况必须记录
-                _logger.LogAccess(ip, "ERROR_FILE_NOT_FOUND", filePath, userAgent);
-                _notificationService.NotifyLogsUpdated();
-                return new List<string>();
-            }
-
             var occupiedRooms = new HashSet<string>();
 
             try
             {
-                using var workbook = new XLWorkbook(filePath);
-                var sheet = workbook.Worksheets.First();
+                // 使用缓存数据而不是每次读取文件
+                var cacheData = GetCachedExcelData();
 
-                foreach (var row in sheet.RowsUsed().Skip(1))
+                if (cacheData.Rows.Count == 0)
                 {
-                    var rowCampus = row.Cell(10).GetString();
-                    var rowTime = row.Cell(14).GetString();
-                    var rowWeeks = row.Cell(15).GetString();
-                    var room = row.Cell(16).GetString();
+                    // 错误情况必须记录
+                    _logger.LogAccess(ip, "ERROR_NO_DATA", "Excel data is empty", userAgent);
+                    _notificationService.NotifyLogsUpdated();
+                    return new List<string>();
+                }
 
-                    if (!room.Any()) continue;
+                foreach (var row in cacheData.Rows)
+                {
+                    if (row.Campus != campus) continue;
+                    if (!IsPeriodMatch(row.Time, weekday, period)) continue;
+                    if (!IsWeekMatch(row.Weeks, week)) continue;
 
-                    if (rowCampus != campus) continue;
-                    if (!IsPeriodMatch(rowTime, weekday, period)) continue;
-                    if (!IsWeekMatch(rowWeeks, week)) continue;
-
-                    occupiedRooms.Add(room);
+                    occupiedRooms.Add(row.Room);
                 }
 
                 var allRooms = list;
@@ -163,45 +280,36 @@ namespace VacantRoomWeb.Services
                 _notificationService.NotifyLogsUpdated();
             }
 
-            var filePath = Path.Combine(AppContext.BaseDirectory, "Data", "schedule.xlsx");
-            if (!File.Exists(filePath))
-            {
-                _logger.LogAccess(ip, "ERROR_FILE_NOT_FOUND", filePath, userAgent);
-                _notificationService.NotifyLogsUpdated();
-                return new List<RoomUsage>();
-            }
-
             var roomUsages = new List<RoomUsage>();
 
             try
             {
-                using var workbook = new XLWorkbook(filePath);
-                var sheet = workbook.Worksheets.First();
+                // 使用缓存数据而不是每次读取文件
+                var cacheData = GetCachedExcelData();
 
-                foreach (var row in sheet.RowsUsed().Skip(1))
+                if (cacheData.Rows.Count == 0)
                 {
-                    var rowCampus = row.Cell(10).GetString();
-                    var rowTime = row.Cell(14).GetString();
-                    var rowWeeks = row.Cell(15).GetString();
-                    var room = row.Cell(16).GetString();
-                    var courseName = row.Cell(5).GetString();
-                    var teacher = row.Cell(12).GetString();
+                    _logger.LogAccess(ip, "ERROR_NO_DATA", "Excel data is empty", userAgent);
+                    _notificationService.NotifyLogsUpdated();
+                    return new List<RoomUsage>();
+                }
 
-                    if (string.IsNullOrEmpty(room)) continue;
-                    if (rowCampus != campus) continue;
-                    if (room != roomNumber) continue;
-                    if (!IsWeekdayMatch(rowTime, weekday)) continue;
-                    if (!IsWeekMatch(rowWeeks, week)) continue;
+                foreach (var row in cacheData.Rows)
+                {
+                    if (row.Campus != campus) continue;
+                    if (row.Room != roomNumber) continue;
+                    if (!IsWeekdayMatch(row.Time, weekday)) continue;
+                    if (!IsWeekMatch(row.Weeks, week)) continue;
 
-                    var period = ExtractPeriodFromTime(rowTime);
+                    var period = ExtractPeriodFromTime(row.Time);
                     var timeRange = GetTimeRangeForPeriod(period);
 
                     roomUsages.Add(new RoomUsage
                     {
                         Period = period,
                         TimeRange = timeRange,
-                        CourseName = courseName,
-                        Teacher = teacher,
+                        CourseName = row.CourseName,
+                        Teacher = row.Teacher,
                     });
                 }
 

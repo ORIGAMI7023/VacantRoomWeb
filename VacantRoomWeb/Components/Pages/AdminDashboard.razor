@@ -1083,6 +1083,30 @@ else
     }
 </style>
 
+<script>
+    window.downloadFile = function (fileName, base64Content) {
+        // 将base64转换为Blob
+        const byteCharacters = atob(base64Content);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'text/csv;charset=utf-8;' });
+
+        // 创建下载链接
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', fileName);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+</script>
+
 @code {
     private bool IsAuthenticated = false;
     private int ActiveTab = 0;
@@ -1247,8 +1271,59 @@ else
 
     private async Task ExportLogs()
     {
-        // 导出日志逻辑
-        await Task.CompletedTask;
+        try
+        {
+            // 获取当前日期和日志
+            var today = DateTime.Now.ToString("yyyy-MM-dd");
+            var logs = LoggingService.GetRecentLogs(10000); // 获取更多日志用于导出
+
+            if (logs.Count == 0)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "当前没有可导出的日志");
+                return;
+            }
+
+            // 生成CSV内容
+            var csvContent = new System.Text.StringBuilder();
+            csvContent.AppendLine("时间,IP地址,操作类型,详细信息,用户代理");
+
+            foreach (var log in logs)
+            {
+                // CSV格式化，处理包含逗号的字段
+                var timestamp = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
+                var ip = EscapeCsvField(log.IP);
+                var action = EscapeCsvField(log.Action);
+                var details = EscapeCsvField(log.Details);
+                var userAgent = EscapeCsvField(log.UserAgent);
+
+                csvContent.AppendLine($"{timestamp},{ip},{action},{details},{userAgent}");
+            }
+
+            // 触发浏览器下载
+            var fileName = $"access-logs-{today}.csv";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(csvContent.ToString());
+            var base64 = Convert.ToBase64String(bytes);
+
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, base64);
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"导出失败: {ex.Message}");
+        }
+    }
+
+    private string EscapeCsvField(string field)
+    {
+        if (string.IsNullOrEmpty(field)) return "";
+
+        // 如果字段包含逗号、引号或换行符，需要用引号包裹并转义引号
+        if (field.Contains(",") || field.Contains("\"") || field.Contains("\n") || field.Contains("\r"))
+        {
+            field = field.Replace("\"", "\"\""); // 转义引号
+            return $"\"{field}\"";
+        }
+
+        return field;
     }
 
     private async Task ViewLogFile(string date)
