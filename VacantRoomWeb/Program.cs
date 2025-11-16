@@ -28,6 +28,9 @@ builder.Services.AddSignalR(options =>
 // Register HttpContextAccessor first (critical for other services)
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
+// Register memory cache for Excel file caching
+builder.Services.AddMemoryCache();
+
 // Register configuration service first (other services depend on it)
 builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
 
